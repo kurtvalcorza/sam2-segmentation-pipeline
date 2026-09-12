@@ -20,7 +20,11 @@ base_model: facebook/sam2.1-hiera-small
 
 ## Interactive Colab Tutorials
 
-This release ships no tutorial notebook (`tutorials/` is absent). The package is exercised through its test suite (`tests/`) and the run instructions in the README; a `NOTEBOOK_SPEC` 1.0 `TASK-INFERENCE` notebook is a follow-up, not a claim this card makes.
+This pipeline provides a ready-to-run interactive Google Colab notebook that exercises the repository's public API end to end — bootstrap a fresh runtime, stage and verify the pinned upstream revision, validate an input, run the task, and inspect and export the outputs:
+
+- **Task Inference Tutorial**:  
+  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/kurtvalcorza/sam2-segmentation-pipeline/blob/main/tutorials/sam2_segmentation_colab.ipynb) [`sam2_segmentation_colab.ipynb`](https://github.com/kurtvalcorza/sam2-segmentation-pipeline/blob/main/tutorials/sam2_segmentation_colab.ipynb)  
+  *Promptable image segmentation (one object per call from point and/or box prompts) with the pinned `facebook/sam2.1-hiera-small` weights: `(K, H, W)` boolean masks plus model-predicted, uncalibrated `iou_scores`; image mode only; `mask_iou` against a drawn rectangle as sanity evidence, no mIoU.*
 
 ---
 
@@ -99,7 +103,7 @@ This pipeline is not intended for decisions in health, safety, criminal justice,
 
 - **Wrong extent:** a click on a part yields the part, the object, or a group; the wrong candidate is chosen by `argmax` and the harm falls on whoever acts on the area or crop; likely for ambiguous single clicks.
 - **Boundary bleed:** low-contrast or transparent edges produce masks that include background or exclude the object; the operator bears the harm when the mask drives a measurement.
-- **Overconfident self-score:** `iou_scores` can be high for a mask that is semantically wrong; automation bias follows when reviewers trust the number.
+- **Overconfident self-score:** `iou_scores` can be high for a mask that is semantically wrong; the value is a regression output, not a bounded IoU, so it can exceed 1.0 (observed as 1.014 on the sibling `sam-vit-segmentation-pipeline` on 2026-09-12; not yet observed on this model); automation bias follows when reviewers trust the number.
 - **Prompt-driven targeting:** the model will isolate any person or body part it is pointed at; the data subject bears the harm when such masks drive tracking, redaction failures, or manipulation.
 - **Privacy exposure:** images of people or private spaces are processed without any content check.
 - **Bias amplification:** any imbalance in SA-1B/SA-V is reproduced as uneven mask quality across appearance groups, undetected because no per-group evaluation exists.
