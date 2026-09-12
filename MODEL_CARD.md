@@ -133,6 +133,8 @@ Prohibited even where the model would work: covert surveillance or tracking of i
 - Tests: `pytest -q -o addopts= tests` — 11 passed, offline, no weights required; `ruff check src tests` clean.
 - Not executed: CUDA path, bfloat16 autocast, video mode, any IoU measurement against real labelled masks.
 
+- **Load-time notice (expected):** transformers logs `You are using a model of type sam2_video to instantiate a model of type sam2` on every load, because the pinned snapshot's `config.json` declares `model_type: sam2_video` while this pipeline deliberately instantiates the image-only `Sam2Model`. The message is a config-name mismatch, not an error; the owner chose on 2026-09-12 to keep `Sam2Model` and document the line rather than load the video class or filter the logger.
+
 ## References
 
 - Ravi, Gabeur, Hu, Hu, Ryali, Ma, Khedr, Rädle, Rolland, Gustafson, Mintun, Pan, Alwala, Carion, Wu, Girshick, Dollár, Feichtenhofer. SAM 2: Segment Anything in Images and Videos. arXiv:2408.00714, 2024. https://arxiv.org/abs/2408.00714

@@ -59,3 +59,7 @@ weights/sam2.1-hiera-small/
 ## Licensing
 
 This repository's code is Apache-2.0 (see `LICENSE`). The upstream weights are Apache-2.0; see `docs/WEIGHTS.md` and `MODEL_CARD.md`.
+
+## Known log line
+
+Every load prints `You are using a model of type sam2_video to instantiate a model of type sam2`. It is expected: the upstream config names the video variant and this pipeline loads the image-only `Sam2Model`. See `MODEL_CARD.md`, Runtime.
