@@ -3,6 +3,8 @@ license: apache-2.0
 model_card_spec: "1.1"
 pipeline_tag: mask-generation
 base_model: facebook/sam2.1-hiera-small
+date_published: "2024-09-24"
+date_published_source: "Hugging Face Hub repository creation date of the exact hosted checkpoint (`createdAt`, https://huggingface.co/api/models/facebook/sam2.1-hiera-small)"
 ---
 
 # SAM 2.1 Hiera-Small (DIMER package v0.1.0) — Promptable Image Segmentation (Inference)
@@ -11,7 +13,6 @@ base_model: facebook/sam2.1-hiera-small
 [![Upstream GitHub](https://img.shields.io/badge/Upstream%20GitHub-facebookresearch%2Fsam2-181717?style=flat&logo=github&logoColor=white)](https://github.com/facebookresearch/sam2)
 [![arXiv Paper](https://img.shields.io/badge/arXiv-2408.00714-b31b1b.svg)](https://arxiv.org/abs/2408.00714)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Pipeline](https://img.shields.io/badge/Pipeline-sam2--segmentation--pipeline-2ea44f?style=flat&logo=github)](https://github.com/kurtvalcorza/sam2-segmentation-pipeline)
 
 > [!WARNING]
 > ⚠️ **Provided for research, training, and evaluation purposes only.** Model weights are redistributed unmodified under their upstream license, which controls your use, including any commercial use or redistribution; the accompanying code and notebooks are released under this repository's license. All of it is supplied **"as is"**, without warranty of any kind, and has not been validated for production, clinical, or safety-critical use. Running the notebooks downloads third-party weights and datasets governed by their own licenses and consumes compute on your own Colab/Kaggle account. To the maximum extent permitted by law, the maintainers of this repository and the DIMER platform accept no liability for any damages arising from their use. Hosting implies no affiliation with or endorsement by the original authors.
@@ -28,7 +29,7 @@ This pipeline provides a ready-to-run interactive Google Colab notebook that exe
 
 ---
 
-###### Description
+#### Description
 
 `facebook/sam2.1-hiera-small` is the Transformers-format release of the SAM 2.1 Hiera-Small checkpoint from Meta FAIR's *SAM 2: Segment Anything in Images and Videos* (Ravi et al., arXiv:2408.00714), pinned here to revision `ee5bba1d82bb8749febdf90f45e84b687142ba03`. The snapshot `config.json` declares the `Sam2VideoModel` architecture: a Hiera hierarchical vision backbone with an FPN neck (`fpn_hidden_size` 256, three feature levels at 256/128/64 px on a 1024x1024 input), a prompt encoder for points and boxes (`hidden_size` 256, 4 point embeddings), a two-layer mask decoder with an IoU-prediction head and `num_multimask_outputs` 3, and a memory attention/encoder stack used only for video. At inference in image mode the model embeds the image once, encodes the caller's point clicks and/or box, and decodes one or three candidate masks with a predicted IoU each; no adaptation happens. This repository exposes the image path only through `Sam2Model` + `Sam2Processor` and adds packaging: `verify_snapshot` and `stage_missing_files` (manifest digest checking and fresh-clone staging), `SAM2SegmentationPipeline.from_pretrained` (verified local loading, `trust_remote_code=False`), `validate_prompts`/`segment` (prompt and image validation, boolean masks at input resolution), and `mask_iou`.
 
