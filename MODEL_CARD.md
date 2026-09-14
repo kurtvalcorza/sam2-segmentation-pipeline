@@ -3,6 +3,8 @@ license: apache-2.0
 model_card_spec: "1.1"
 pipeline_tag: mask-generation
 base_model: facebook/sam2.1-hiera-small
+date_published: "2024-09-24"
+date_published_source: "Hugging Face Hub repository creation date of the exact hosted checkpoint (`createdAt`, https://huggingface.co/api/models/facebook/sam2.1-hiera-small)"
 ---
 
 # SAM 2.1 Hiera-Small (DIMER package v0.1.0) — Promptable Image Segmentation (Inference)
@@ -11,7 +13,6 @@ base_model: facebook/sam2.1-hiera-small
 [![Upstream GitHub](https://img.shields.io/badge/Upstream%20GitHub-facebookresearch%2Fsam2-181717?style=flat&logo=github&logoColor=white)](https://github.com/facebookresearch/sam2)
 [![arXiv Paper](https://img.shields.io/badge/arXiv-2408.00714-b31b1b.svg)](https://arxiv.org/abs/2408.00714)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Pipeline](https://img.shields.io/badge/Pipeline-sam2--segmentation--pipeline-2ea44f?style=flat&logo=github)](https://github.com/kurtvalcorza/sam2-segmentation-pipeline)
 
 > [!WARNING]
 > ⚠️ **Provided for research, training, and evaluation purposes only.** Model weights are redistributed unmodified under their upstream license, which controls your use, including any commercial use or redistribution; the accompanying code and notebooks are released under this repository's license. All of it is supplied **"as is"**, without warranty of any kind, and has not been validated for production, clinical, or safety-critical use. Running the notebooks downloads third-party weights and datasets governed by their own licenses and consumes compute on your own Colab/Kaggle account. To the maximum extent permitted by law, the maintainers of this repository and the DIMER platform accept no liability for any damages arising from their use. Hosting implies no affiliation with or endorsement by the original authors.
@@ -28,7 +29,7 @@ This pipeline provides a ready-to-run interactive Google Colab notebook that exe
 
 ---
 
-###### Description
+#### Description
 
 `facebook/sam2.1-hiera-small` is the Transformers-format release of the SAM 2.1 Hiera-Small checkpoint from Meta FAIR's *SAM 2: Segment Anything in Images and Videos* (Ravi et al., arXiv:2408.00714), pinned here to revision `ee5bba1d82bb8749febdf90f45e84b687142ba03`. The snapshot `config.json` declares the `Sam2VideoModel` architecture: a Hiera hierarchical vision backbone with an FPN neck (`fpn_hidden_size` 256, three feature levels at 256/128/64 px on a 1024x1024 input), a prompt encoder for points and boxes (`hidden_size` 256, 4 point embeddings), a two-layer mask decoder with an IoU-prediction head and `num_multimask_outputs` 3, and a memory attention/encoder stack used only for video. At inference in image mode the model embeds the image once, encodes the caller's point clicks and/or box, and decodes one or three candidate masks with a predicted IoU each; no adaptation happens. This repository exposes the image path only through `Sam2Model` + `Sam2Processor` and adds packaging: `verify_snapshot` and `stage_missing_files` (manifest digest checking and fresh-clone staging), `SAM2SegmentationPipeline.from_pretrained` (verified local loading, `trust_remote_code=False`), `validate_prompts`/`segment` (prompt and image validation, boolean masks at input resolution), and `mask_iou`.
 
@@ -63,7 +64,7 @@ The upstream training masks were produced by a model-in-the-loop annotation engi
 
 ###### Environment
 
-Operating environment: Python 3.12 with `torch==2.14.0`, `transformers==4.57.6`, `safetensors==0.8.0`, `numpy==2.5.3`, `pillow==11.3.0`, float32 on CPU; CUDA is used automatically when visible but was not exercised for this card (the upstream README's bfloat16 autocast is not applied). Measured on the reference machine with the GPU hidden (`CUDA_VISIBLE_DEVICES=""`): load 4.80 s (184 MB checkpoint), a 320x240 synthetic scene 0.96 s per point prompt and 0.94 s per box prompt, a 4096x4096 noise image 1.19 s — cost is dominated by the fixed 1024x1024 working resolution, and the caller's resolution mostly sets the size of the up-sampled boolean masks (a 4096x4096 three-mask result is 48 MiB). Data environment: the model assumes an ordinary photograph in which the prompted object has a visible boundary; low contrast, transparency, thin structures, and heavy occlusion produce masks that bleed or fragment, and the predicted IoU may stay high while they do.
+Operating environment: Python 3.12 with `torch==2.14.0`, `torchvision==0.29.0`, `torchaudio==2.11.0`, `transformers==4.57.6`, `safetensors==0.8.0`, `numpy==2.5.3`, `pillow==11.3.0`, float32 on CPU; CUDA is used automatically when visible but was not exercised for this card (the upstream README's bfloat16 autocast is not applied). Measured on the reference machine with the GPU hidden (`CUDA_VISIBLE_DEVICES=""`): load 4.80 s (184 MB checkpoint), a 320x240 synthetic scene 0.96 s per point prompt and 0.94 s per box prompt, a 4096x4096 noise image 1.19 s — cost is dominated by the fixed 1024x1024 working resolution, and the caller's resolution mostly sets the size of the up-sampled boolean masks (a 4096x4096 three-mask result is 48 MiB). Data environment: the model assumes an ordinary photograph in which the prompted object has a visible boundary; low contrast, transparency, thin structures, and heavy occlusion produce masks that bleed or fragment, and the predicted IoU may stay high while they do.
 
 #### Metrics
 
@@ -131,7 +132,7 @@ Prohibited even where the model would work: covert surveillance or tracking of i
 
 ## Runtime
 
-- Pins: `torch==2.14.0`, `transformers==4.57.6`, `safetensors==0.8.0`, `numpy==2.5.3`, `pillow==11.3.0`; Python 3.12.
+- Pins: `torch==2.14.0`, `torchvision==0.29.0`, `torchaudio==2.11.0`, `transformers==4.57.6`, `safetensors==0.8.0`, `numpy==2.5.3`, `pillow==11.3.0`; Python 3.12.
 - Precision: float32; preprocessing resize to 1024x1024, bilinear, ImageNet mean/std (`Sam2ImageProcessorFast` from the snapshot); masks decoded at 256x256 and up-sampled to the input size, binarised at logit 0.
 - Measured 2026-09-12 in the Windows venv (`torch 2.14.0+cu130`) with `CUDA_VISIBLE_DEVICES=""`, device `cpu`: `verify_snapshot` 0.12 s (7 files, 184 MB); load 4.80 s; `segment` on a synthetic 320x240 scene (grey background, dark rectangle at [40, 60, 140, 180], red disc at [200, 80, 280, 160]) with one foreground click at (90, 120) → `masks (3, 240, 320)` bool, `iou_scores` [0.010, 0.993, 0.400], areas [1767, 12220, 19768] px, `mask_iou` of the argmax candidate against the drawn rectangle 1.000, 0.962 s; box `[200, 80, 281, 161]` with `multimask=False` → one mask of 5145 px (drawn disc about 5026 px), `iou_scores` [0.987], 0.938 s; 4096x4096 uniform-noise image with a box → `(1, 4096, 4096)` in 1.19 s. Process wall 11 s.
 - Tests: `pytest -q -o addopts= tests` — 11 passed, offline, no weights required; `ruff check src tests` clean.
