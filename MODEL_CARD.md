@@ -7,7 +7,7 @@ date_published: "2024-09-24"
 date_published_source: "Hugging Face Hub repository creation date of the exact hosted checkpoint (`createdAt`, https://huggingface.co/api/models/facebook/sam2.1-hiera-small)"
 ---
 
-# SAM 2.1 Hiera-Small (DIMER package v0.1.0) — Promptable Image Segmentation (Inference)
+# SAM 2.1 Hiera-Small — Promptable Image Segmentation (Inference)
 
 [![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-facebook%2Fsam2.1--hiera--small-ffcc4d?style=flat)](https://huggingface.co/facebook/sam2.1-hiera-small)
 [![Upstream GitHub](https://img.shields.io/badge/Upstream%20GitHub-facebookresearch%2Fsam2-181717?style=flat&logo=github&logoColor=white)](https://github.com/facebookresearch/sam2)
