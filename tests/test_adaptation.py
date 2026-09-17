@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+import torch
+from PIL import Image
+
+from sam2_segmentation_pipeline.pipeline import (
+    ARTIFACT_MANIFEST_NAME,
+    ARTIFACT_WEIGHTS_NAME,
+    SAM2SegmentationPipeline,
+    validate_segmentation_dataset,
+)
+
+
+class _Batch(dict):
+    def to(self, device):
+        return _Batch({key: value.to(device) for key, value in self.items()})
+
+
+class _Processor:
+    def __call__(self, *, images, return_tensors, **kwargs):
+        assert return_tensors == "pt"
+        values = torch.ones(1, 1, 4, 4)
+        batch = _Batch(pixel_values=values)
+        if "input_points" in kwargs:
+            batch["input_points"] = torch.tensor(kwargs["input_points"], dtype=torch.float32)
+            batch["input_labels"] = torch.tensor(kwargs["input_labels"], dtype=torch.long)
+        if "input_boxes" in kwargs:
+            batch["input_boxes"] = torch.tensor(kwargs["input_boxes"], dtype=torch.float32)
+        return batch
+
+
+class _FakeSAM2(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.backbone = torch.nn.Linear(1, 1)
+        self.mask_decoder = torch.nn.Module()
+        self.mask_decoder.output_hypernetworks_mlps = torch.nn.ModuleList(
+            [torch.nn.Conv2d(1, 1, 1)]
+        )
+
+    def get_image_embeddings(self, pixel_values):
+        return [pixel_values]
+
+    def forward(self, *, image_embeddings, multimask_output, **kwargs):
+        assert multimask_output is False
+        logits = self.mask_decoder.output_hypernetworks_mlps[0](image_embeddings[-1])
+        return SimpleNamespace(pred_masks=logits.unsqueeze(1))
+
+
+def _records() -> list[dict]:
+    records = []
+    for index in range(4):
+        image = Image.new("RGB", (16, 16), (index * 20, 40, 80))
+        mask = np.zeros((16, 16), dtype=np.bool_)
+        mask[3:13, 4:12] = True
+        records.append(
+            {
+                "id": f"shape-{index}",
+                "image": image,
+                "mask": mask,
+                "points": [[8.0, 8.0]],
+                "point_labels": [1],
+                "box": [4.0, 3.0, 12.0, 13.0],
+            }
+        )
+    return records
+
+
+def _pipeline(model=None) -> SAM2SegmentationPipeline:
+    model = model or _FakeSAM2()
+
+    def runner(*args):
+        return np.zeros((1, 16, 16), dtype=np.bool_), [0.0]
+
+    return SAM2SegmentationPipeline(
+        runner,
+        "cpu",
+        model=model,
+        processor=_Processor(),
+    )
+
+
+def test_dataset_validation_rejects_duplicate_ids_and_non_boolean_masks():
+    records = _records()
+    assert validate_segmentation_dataset(records)["records"] == 4
+    records[1]["id"] = records[0]["id"]
+    with pytest.raises(ValueError, match="duplicate record id"):
+        validate_segmentation_dataset(records)
+    records = _records()
+    records[0]["mask"] = records[0]["mask"].astype(np.uint8)
+    with pytest.raises(TypeError, match="mask must be boolean"):
+        validate_segmentation_dataset(records)
+
+
+def test_finetune_updates_only_declared_adapter_surface():
+    pipeline = _pipeline()
+    counts = pipeline.freeze_for_adaptation()
+    assert counts["trainable_parameters"] > 0
+    assert pipeline.model.backbone.weight.requires_grad is False
+    before = pipeline.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach().clone()
+    history = pipeline.finetune(_records()[:2], _records()[2:], epochs=1, learning_rate=1e-2)
+    after = pipeline.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
+    assert history[0]["optimizer_steps"] == 2
+    assert not torch.equal(before, after)
+    assert pipeline.adaptation_config["weight_delta_l2"] > 0
+
+
+def test_artifact_round_trip_and_integrity_rejection(tmp_path):
+    source = _pipeline()
+    source.freeze_for_adaptation()
+    source.adaptation_config["weight_delta_l2"] = 1.0
+    artifact = source.save_artifact(tmp_path / "artifact", producer_revision="a" * 40)
+
+    fresh = _pipeline()
+    fresh.load_artifact(artifact)
+    expected = source.model.mask_decoder.output_hypernetworks_mlps[0].weight
+    actual = fresh.model.mask_decoder.output_hypernetworks_mlps[0].weight
+    assert torch.equal(expected, actual)
+
+    unexpected = artifact / "unexpected.txt"
+    unexpected.write_text("not declared", encoding="utf-8")
+    with pytest.raises(ValueError, match="contain exactly"):
+        _pipeline().load_artifact(artifact)
+    unexpected.unlink()
+
+    manifest_path = artifact / ARTIFACT_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][0]["sha256"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="SHA-256"):
+        _pipeline().load_artifact(artifact)
+    assert (artifact / ARTIFACT_WEIGHTS_NAME).is_file()

@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "sam2_segmentation_pipeline"
 REPO_NAME = "sam2-segmentation-pipeline"
 NOTEBOOK_NAME = "sam2_segmentation_colab.ipynb"
-EXPECTED_PROFILE = "TASK-INFERENCE"
+EXPECTED_PROFILE = "E2E"
 EXPECTED_MODEL_ID = "facebook/sam2.1-hiera-small"
 PIPELINE_CLASS = "SAM2SegmentationPipeline"
 # Additional 40-hex revisions a document may legitimately cite (none by default).
@@ -32,42 +32,35 @@ KNOWN_SHAS: frozenset[str] = frozenset(())
 BYOD_GATES = ("USE_BYOD",)
 # Machine-readable artifacts the notebook must write (OUT1-OUT3, DAT24, EVAL21).
 EXPECTED_OUTPUTS = (
-    "outputs/sam2_segmentation_input_manifest.json",
+    "outputs/sam2_segmentation_dataset_manifest.json",
     "outputs/sam2_segmentation_evaluation_report.json",
     "outputs/sam2_segmentation_result.json",
-    "outputs/sam2_segmentation_mask.png",
-    "outputs/sam2_segmentation_overlay.png",
+    "outputs/sam2-mask-hypernetwork-adapter-v1",
 )
 # Profile-specific code the notebook must exercise through the carried module's public API.
 CODE_MARKERS = (
-    "input_manifest = validate_inputs(image, points=points, point_labels=point_labels, multimask=MULTIMASK, names=[image_name])",
-    "validate_inputs(image, points=[[image.width, image.height]], point_labels=[1])",
-    "result = pipe.segment(image, points=points, point_labels=point_labels, multimask=MULTIMASK)",
-    "report = evaluation_report(result, reference_mask, sample_kind=sample_kind)",
-    "print({'ceilings': {'MIN_IMAGE_SIDE': MIN_IMAGE_SIDE, 'MAX_IMAGE_SIDE': MAX_IMAGE_SIDE, 'MAX_PROMPTS': MAX_PROMPTS, 'NUM_MULTIMASK_OUTPUTS': NUM_MULTIMASK_OUTPUTS, 'MASK_THRESHOLD': MASK_THRESHOLD}})",
-    "MULTIMASK = True",
-    "reference_mask = np.asarray(reference, dtype=np.bool_)",
-    "best = int(np.argmax(result['iou_scores']))",
-    "hashlib.sha256(np.asarray(image.convert('RGB')).tobytes()).hexdigest()",
-    "hashlib.sha256(np.packbits(best_mask).tobytes()).hexdigest()",
-    "'iou_score_model_predicted': float(result['iou_scores'][i])",
-    "'model_revision': MODEL_REVISION",
-    "'model_license': MODEL_LICENSE",
+    "train_manifest = validate_segmentation_dataset(train_records)",
+    "val_manifest = validate_segmentation_dataset(val_records)",
+    "base_eval = pipe.evaluate_adaptation(val_records)",
+    "parameter_counts = pipe.freeze_for_adaptation()",
+    "history = pipe.finetune(train_records, val_records, epochs=2, learning_rate=2e-5, seed=42)",
+    "adapted_eval = pipe.evaluate_adaptation(val_records)",
+    "unseen_result = pipe.segment(",
+    "artifact_dir = pipe.save_artifact(",
+    "reloaded_pipe = SAM2SegmentationPipeline.from_artifact(",
+    "np.array_equal(unseen_result['masks'], reloaded_result['masks'])",
+    "pipe.adaptation_config['weight_delta_l2']",
     "transformers.__version__",
     "'device': pipe.device",
 )
 # Profile-specific learner-facing statements.
 MARKDOWN_MARKERS = (
-    "**Capability:** promptable image segmentation (point and/or box prompts → masks for one object)",
-    "**No adaptation occurs:**",
-    "**Expected load notice.**",
-    "the **model's own prediction**",
-    "**uncalibrated** estimate",
-    "**a value may exceed 1.0**",
-    "the pipeline ships no threshold, does not choose for you",
-    "the verdict is `not-measurable`",
-    "`sample-sanity`",
-    "video segmentation or tracking (`Sam2VideoModel` is not exposed)",
+    "bounded mask-hypernetwork gradient adaptation",
+    "Only the first mask-token output hypernetwork is trainable",
+    "prompt-box baseline",
+    "SafeTensors",
+    "fresh-model reload",
+    "sample-sanity",
 )
 # Direct-library use that must stay inside the carried module cell (G2: the notebook calls the
 # pipeline API, it does not reimplement it). Checked on every code cell except the embedded one.

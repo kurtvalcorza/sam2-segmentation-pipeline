@@ -1,21 +1,27 @@
-"""Per-repository template for tools/build_notebook.py (NOTEBOOK_SPEC 1.1 §3.6 standalone carrier).
+"""E2E notebook template for SAM 2.1 promptable-segmentation adaptation."""
 
-Only the task-specific prose and stage cells live here. Runtime install, the embedded pipeline
-module, and the model pin/stage/verify cells are produced by the generator from repository
-sources so they cannot drift from the package.
-"""
-# ruff: noqa: E501  -- markdown prose and code-cell text are kept on single lines for readable rendering
+# ruff: noqa: E501
 
 TEMPLATE = {
     "package": "sam2_segmentation_pipeline",
     "repo_name": "sam2-segmentation-pipeline",
     "stem": "sam2_segmentation",
     "notebook_name": "sam2_segmentation_colab.ipynb",
-    "profile": "TASK-INFERENCE",
+    "profile": "E2E",
+    "run_all": (
+        "Selecting **Run all** on a fresh CUDA runtime installs the pinned dependencies, verifies the exact base "
+        "snapshot, generates and validates 24 records, freezes the base, performs the bounded gradient update, scores "
+        "the held-out split, predicts an unseen scene, exports the adapter, reloads it over a fresh base, verifies "
+        "numeric equivalence, and writes provenance without a clone, credential, upload, or configuration edit."
+    ),
+    "byod": (
+        "Set `USE_BYOD = True` to upload a bounded paired image/mask ZIP. The uploaded records pass through the same "
+        "validation, split, adaptation, evaluation, export, and reload path as the generated dataset."
+    ),
     "pipeline_class": "SAM2SegmentationPipeline",
     "weights_key": "sam2.1-hiera-small",
-    "runtime_imports": ["torch", "transformers"],
-    "title": "SAM 2.1 Hiera-Small — DIMER promptable image segmentation tutorial (standalone)",
+    "runtime_imports": ["torch", "transformers", "safetensors"],
+    "title": "SAM 2.1 Hiera-Small — DIMER end-to-end promptable segmentation fine-tuning",
     "badges": [
         (
             "GitHub",
@@ -32,253 +38,209 @@ TEMPLATE = {
             "https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-facebook%2Fsam2.1--hiera--small-ffcc4d?style=flat",
             "https://huggingface.co/facebook/sam2.1-hiera-small",
         ),
-        (
-            "Upstream",
-            "https://img.shields.io/badge/Upstream-facebookresearch%2Fsam2-181717?style=flat&logo=github&logoColor=white",
-            "https://github.com/facebookresearch/sam2",
-        ),
-        ("arXiv", "https://img.shields.io/badge/arXiv-2408.00714-b31b1b.svg", "https://arxiv.org/abs/2408.00714"),
     ],
-    "capability": "promptable image segmentation (point and/or box prompts → masks for one object) using the pinned `facebook/sam2.1-hiera-small` weights",
+    "capability": "pinned SAM 2.1 inference plus bounded mask-hypernetwork gradient adaptation, held-out mask-IoU evaluation, safe adapter export, and fresh reload",
     "intro": (
-        "At inference the image is resized to 1024×1024 and encoded once by a Hiera image encoder; the prompt encoder "
-        "embeds your clicks (label 1 = foreground, 0 = background) and/or one xyxy box, and the mask decoder returns up "
-        "to three candidate masks at 256×256, which the pipeline up-samples to the input resolution and binarises at "
-        "logit 0, together with the model's own predicted IoU for each candidate. **No adaptation occurs:** no training, "
-        "fine-tuning, in-context conditioning, or preprocessing fitting happens in this notebook — the upstream "
-        "checkpoint supplies the weights and processor, and the carried pipeline module adds snapshot verification, "
-        "image and prompt validation with named ceilings, a single-object-per-call contract, a fixed output contract and "
-        "the `mask_iou`, `validate_inputs` and `evaluation_report` helpers. The default sample is a synthetic scene "
-        "drawn in code; the IoU reported for it is sanity evidence against a shape you drew, not a benchmark claim.\n\n"
-        "**Expected load notice.** Transformers logs `You are using a model of type sam2_video to instantiate a model of "
-        "type sam2` when Section 3 loads the model. It is expected and harmless: the pinned snapshot's `config.json` "
-        "declares the video variant (`model_type: sam2_video`) while this pipeline loads the image-only `Sam2Model`, "
-        "which shares the same weights (documented in the model card and README). A different warning, or an error, is a "
-        "real signal."
+        "This notebook performs a real local gradient update. It freezes the Hiera encoder, prompt encoder, and the rest "
+        "of the mask decoder, then trains only the first mask-token output hypernetwork (139,808 parameters) with BCE "
+        "plus soft-Dice loss. The default dataset is 24 deterministic generated shape scenes split 18/6 before model "
+        "execution. A SafeTensors adapter and closed SHA-256 manifest are exported and attached to a fresh pinned base "
+        "model. These are tutorial sample-sanity results, not a segmentation benchmark."
     ),
     "learning_objectives": (
-        "install the pinned runtime, read what the carried pipeline module guarantees, resolve and digest-verify the "
-        "immutable upstream model revision (and recognise the expected `sam2_video → sam2` load notice), draw a "
-        "synthetic scene with a known object, validate the image and prompts into an input manifest through the "
-        "pipeline's own validation stage, segment one object from a click through the public API, read the candidate "
-        "masks and their uncalibrated model-predicted IoU scores correctly, produce an evaluation report that is "
-        "`sample-sanity` with `mask_iou` only when a reference mask exists and `not-measurable` otherwise, exercise an "
-        "optional BYOD path, and export the mask plus machine-readable provenance."
+        "validate paired image/mask/prompt data, preserve a held-out split, measure the pretrained baseline, run bounded "
+        "AdamW adaptation, evaluate mask IoU against a prompt-box baseline, infer on unseen data, export a base-bound "
+        "SafeTensors adapter, and verify it after a fresh-model reload."
     ),
     "exclusions": (
-        "video segmentation or tracking (`Sam2VideoModel` is not exposed), automatic \"segment everything\" without "
-        "prompts, text prompts (see the sibling Grounding DINO pipeline for boxes from text), several objects in one "
-        "call, semantic class labels, mIoU evaluation against labelled masks, or any training."
+        "full-model training, video tracking, automatic segment-everything, semantic class learning, production-scale "
+        "training, or benchmark claims. The adapter changes one image-mode mask hypernetwork only."
     ),
     "prerequisites": [
-        "- **Runtime:** a fresh supported runtime (Google Colab or Jupyter, Python 3.12). The default path runs on CPU and uses CUDA automatically when available; inference is float32 on both. CPU is adequate: the repository's model card records 4.8 s to load and about 0.9 s per `segment` on the 320×240 synthetic scene in the Windows venv (Intel Core Ultra 9 275HX); the encoder cost is fixed by the 1024×1024 resize, so image resolution only changes the size of the returned masks. The pinned `torch==2.14.0` install and the ~184 MB checkpoint are the large downloads of the run.",
-        "- **Knowledge:** basic Python, NumPy and PIL; what a binary mask is; what intersection-over-union measures.",
-        "- **Expected warning:** Transformers prints `You are using a model of type sam2_video to instantiate a model of type sam2` during the model load in Section 3. That notice is expected; any other warning or an error is not.",
-        "- **Data:** the default sample is a deterministic 320×240 scene drawn in code (grey background, one dark rectangle, one red disc) with a foreground click inside the rectangle, so nothing is downloaded and no private data is needed. Optional BYOD upload is gated off by default so the sample path can run top-to-bottom without interaction. Expected BYOD input: one image file decodable by Pillow (PNG/JPEG/WebP and similar), any colour mode, sides between 16 and 4096 px, plus a click position inside it set through the form parameters. Do not upload confidential or restricted data to a hosted notebook environment unless you are authorized to do so. Uploaded inputs remain in the notebook runtime; this pipeline does not send them to a third-party inference API.",
+        "- **Runtime:** fresh Python 3.12 with an NVIDIA T4-class GPU or better. CUDA is required for the default fine-tuning path. The pinned 184 MB checkpoint is acquired automatically.",
+        "- **Knowledge:** Python, binary masks, IoU, train/validation separation, and adapter-versus-base semantics.",
+        "- **Data:** the default path generates 24 shape scenes. Optional BYOD accepts a ZIP with `images/` and `masks/` files paired by stem; it is off by default and follows the same E2E path. Do not upload confidential or restricted data unless you are authorized to use it in the hosted runtime.",
     ],
     "cells": [
         {
             "md": (
-                "## 4. Draw the synthetic scene or optional BYOD\n\n"
-                "The default sample is **synthetic** and carries its own reference: a deterministic 320×240 RGB scene is drawn "
-                "in code — grey background, a dark filled rectangle at `[40, 60, 140, 180]` and a red filled disc at "
-                "`[200, 80, 280, 160]` — and the prompt is one **foreground click at (90, 120)**, inside the rectangle. A "
-                "boolean reference mask of the drawn rectangle is kept for the `mask_iou` sanity check later. This is the same "
-                "scene and click the repository's smoke run used; it is not a labelled dataset, so nothing here is an mIoU "
-                "measurement. The image digest and the prompt are printed. BYOD is optional and disabled by default; when "
-                "enabled, upload one image and set `POINT_X`/`POINT_Y` to a pixel inside the object you want — no reference "
-                "mask exists for it, so the evaluation report will be `not-measurable`.\n\n"
-                "Prompts describe **one object per call**: up to `MAX_PROMPTS` (16) clicks with 0/1 labels and/or one xyxy box; "
-                "several objects need several calls. `MULTIMASK` (default `True`) asks for three candidate masks — useful when "
-                "a single click is ambiguous (part, object, or object plus surroundings) — while `False` returns one. Nothing "
-                "is validated in this cell: the next section hands the image and the prompts to the pipeline's own validation "
-                "stage, which is the only checker. Look for a dictionary naming the sample kind, the image size and digest, the "
-                "click, the multimask setting, and the reference mask area."
+                "## 4. Generate or upload a paired segmentation dataset\n\n"
+                "The default 24 deterministic 256×256 scenes contain varied rounded rectangles and ellipses plus "
+                "distractors. Each record has an RGB image, boolean mask, foreground point, and bounding box. Records "
+                "0–17 train; 18–23 are held out. BYOD uses matching `images/<id>` and `masks/<id>.png` members and rejects "
+                "unsafe archive paths before decoding."
             ),
             "code": (
-                "import hashlib\n"
-                "import io\n\n"
+                "import io\n"
+                "import zipfile\n\n"
                 "import numpy as np\n"
                 "from PIL import Image, ImageDraw\n\n"
-                "USE_BYOD = False  # @param {{type:\"boolean\"}}\n"
-                "POINT_X = 90  # @param {{type:\"integer\"}}\n"
-                "POINT_Y = 120  # @param {{type:\"integer\"}}\n"
-                "MULTIMASK = True  # @param {{type:\"boolean\"}}\n\n"
+                "USE_BYOD = False  # @param {{type:\"boolean\"}}\n\n"
+                "def record_from_pair(record_id, image, mask_image):\n"
+                "    image = image.convert('RGB')\n"
+                "    mask = np.asarray(mask_image.convert('L')) > 127\n"
+                "    ys, xs = np.where(mask)\n"
+                "    if len(xs) == 0:\n"
+                "        raise ValueError(f'{{record_id}} has an empty mask')\n"
+                "    x0, x1, y0, y1 = int(xs.min()), int(xs.max()) + 1, int(ys.min()), int(ys.max()) + 1\n"
+                "    point = [float(np.median(xs)), float(np.median(ys))]\n"
+                "    if not mask[int(point[1]), int(point[0])]:\n"
+                "        point = [float(xs[0]), float(ys[0])]\n"
+                "    return {{'id': record_id, 'image': image, 'mask': mask, 'points': [point], 'point_labels': [1], 'box': [float(x0), float(y0), float(x1), float(y1)]}}\n\n"
+                "def generated_records():\n"
+                "    records = []\n"
+                "    for index in range(24):\n"
+                "        rng = np.random.default_rng(8100 + index)\n"
+                "        image = Image.new('RGB', (256, 256), tuple(int(v) for v in rng.integers(35, 95, 3)))\n"
+                "        draw = ImageDraw.Draw(image)\n"
+                "        mask_image = Image.new('L', image.size, 0)\n"
+                "        mask_draw = ImageDraw.Draw(mask_image)\n"
+                "        x0, y0 = int(rng.integers(28, 105)), int(rng.integers(28, 105))\n"
+                "        width, height = int(rng.integers(70, 125)), int(rng.integers(65, 120))\n"
+                "        box = [x0, y0, min(244, x0 + width), min(244, y0 + height)]\n"
+                "        colour = tuple(int(v) for v in rng.integers(145, 245, 3))\n"
+                "        if index % 2:\n"
+                "            draw.ellipse(box, fill=colour); mask_draw.ellipse(box, fill=255)\n"
+                "        else:\n"
+                "            radius = 18 + index % 12\n"
+                "            draw.rounded_rectangle(box, radius=radius, fill=colour)\n"
+                "            mask_draw.rounded_rectangle(box, radius=radius, fill=255)\n"
+                "        distractor = [int(rng.integers(5, 55)), int(rng.integers(175, 215)), int(rng.integers(70, 120)), int(rng.integers(225, 250))]\n"
+                "        draw.rectangle(distractor, fill=tuple(int(v) for v in rng.integers(90, 180, 3)))\n"
+                "        records.append(record_from_pair(f'generated-{{index:02d}}', image, mask_image))\n"
+                "    return records\n\n"
+                "def records_from_zip(blob):\n"
+                "    if len(blob) > 256 * 1024 * 1024:\n"
+                "        raise ValueError('BYOD ZIP exceeds the 256 MiB upload ceiling')\n"
+                "    with zipfile.ZipFile(io.BytesIO(blob)) as archive:\n"
+                "        infos = archive.infolist()\n"
+                "        names = archive.namelist()\n"
+                "        normalized = [name.replace('\\\\', '/') for name in names]\n"
+                "        if len(names) > 130 or sum(info.file_size for info in infos) > 512 * 1024 * 1024:\n"
+                "            raise ValueError('unsafe or oversized BYOD archive')\n"
+                "        if any(info.flag_bits & 1 for info in infos) or any(name.startswith('/') or '..' in name.split('/') for name in normalized):\n"
+                "            raise ValueError('unsafe or oversized BYOD archive')\n"
+                "        image_entries = [(name.split('/')[-1].rsplit('.', 1)[0], original) for name, original in zip(normalized, names) if name.startswith('images/') and name.lower().endswith(('.png', '.jpg', '.jpeg'))]\n"
+                "        mask_entries = [(name.split('/')[-1].rsplit('.', 1)[0], original) for name, original in zip(normalized, names) if name.startswith('masks/') and name.lower().endswith('.png')]\n"
+                "        images, masks = dict(image_entries), dict(mask_entries)\n"
+                "        if len(images) != len(image_entries) or len(masks) != len(mask_entries):\n"
+                "            raise ValueError('BYOD archive contains duplicate image or mask stems')\n"
+                "        if set(images) != set(masks):\n"
+                "            raise ValueError('BYOD image and mask stems must match exactly')\n"
+                "        records = []\n"
+                "        for key in sorted(images):\n"
+                "            image = Image.open(io.BytesIO(archive.read(images[key]))); image.load()\n"
+                "            mask = Image.open(io.BytesIO(archive.read(masks[key]))); mask.load()\n"
+                "            records.append(record_from_pair(key, image, mask))\n"
+                "        return records\n\n"
                 "if USE_BYOD:\n"
                 "    from google.colab import files\n"
                 "    uploaded = files.upload()\n"
-                "    image_name = next(iter(uploaded))\n"
-                "    image = Image.open(io.BytesIO(uploaded[image_name]))\n"
-                "    image.load()\n"
-                "    reference_mask = None\n"
-                "    sample_kind = 'BYOD'\n"
+                "    dataset_records = records_from_zip(next(iter(uploaded.values())))\n"
+                "    dataset_kind = 'BYOD'\n"
                 "else:\n"
-                "    # Deterministic synthetic scene: no randomness, so no seed is needed and the digest is stable.\n"
-                "    image = Image.new('RGB', (320, 240), (128, 128, 128))\n"
-                "    draw = ImageDraw.Draw(image)\n"
-                "    rectangle_box = [40, 60, 140, 180]\n"
-                "    draw.rectangle(rectangle_box, fill=(30, 30, 30))\n"
-                "    draw.ellipse([200, 80, 280, 160], fill=(220, 30, 30))\n"
-                "    reference = Image.new('1', image.size, 0)\n"
-                "    ImageDraw.Draw(reference).rectangle(rectangle_box, fill=1)\n"
-                "    reference_mask = np.asarray(reference, dtype=np.bool_)\n"
-                "    image_name = 'synthetic_scene_320x240.png'\n"
-                "    sample_kind = 'synthetic'\n\n"
-                "points, point_labels = [[POINT_X, POINT_Y]], [1]\n"
-                "image_sha256 = hashlib.sha256(np.asarray(image.convert('RGB')).tobytes()).hexdigest()\n"
-                "print({{'sample_kind': sample_kind, 'name': image_name, 'mode': image.mode, 'size': image.size, 'rgb_sha256': image_sha256, 'points': points, 'point_labels': point_labels, 'multimask': MULTIMASK, 'reference_mask_area_px': None if reference_mask is None else int(reference_mask.sum())}})"
+                "    dataset_records = generated_records()\n"
+                "    dataset_kind = 'generated'\n"
+                "if len(dataset_records) < 8:\n"
+                "    raise ValueError('E2E adaptation requires at least 8 records')\n"
+                "split_at = max(2, int(len(dataset_records) * 0.75))\n"
+                "train_records, val_records = dataset_records[:split_at], dataset_records[split_at:]\n"
+                "print({{'dataset_kind': dataset_kind, 'records': len(dataset_records), 'train': len(train_records), 'held_out': len(val_records)}})"
             ),
         },
         {
-            "md": (
-                "## 5. Validate the request → input manifest\n\n"
-                "`validate_inputs` is the pipeline's public validation stage: it applies exactly the checks `segment` applies — "
-                "image type and sides `MIN_IMAGE_SIDE`..`MAX_IMAGE_SIDE` px, at least one of points or box, 1..`MAX_PROMPTS` "
-                "clicks that lie inside the image with 0/1 labels, one non-empty xyxy box inside the image, and a boolean "
-                "`multimask` — and returns an **input manifest** naming the schema and ceilings, the input's observed mode and "
-                "size, how many clicks and whether a box was given, the cleaned prompt values, and the verdict. The manifest is "
-                "written to `outputs/{stem}_input_manifest.json`. To show what rejection looks like, the cell also validates a "
-                "click outside the image and records the pipeline's own error message as a finding. Inside the pipeline the "
-                "image is converted to RGB and resized by the processor; masks are mapped back to input pixels, and nothing "
-                "else is dropped or altered."
-            ),
+            "md": "## 5. Validate the dataset and split\n\nBoth splits must have unique IDs, exact image/mask alignment, boolean non-empty masks, valid prompts, and deterministic content fingerprints. Cross-split IDs are rejected.",
             "code": (
                 "import json\n"
                 "import os\n\n"
                 "os.makedirs('outputs', exist_ok=True)\n"
-                "print({{'ceilings': {{'MIN_IMAGE_SIDE': MIN_IMAGE_SIDE, 'MAX_IMAGE_SIDE': MAX_IMAGE_SIDE, 'MAX_PROMPTS': MAX_PROMPTS, 'NUM_MULTIMASK_OUTPUTS': NUM_MULTIMASK_OUTPUTS, 'MASK_THRESHOLD': MASK_THRESHOLD}}}})\n"
-                "input_manifest = validate_inputs(image, points=points, point_labels=point_labels, multimask=MULTIMASK, names=[image_name])\n"
-                "# Demonstrate rejection on a prompt outside the image; the finding is recorded, not swallowed.\n"
-                "try:\n"
-                "    validate_inputs(image, points=[[image.width, image.height]], point_labels=[1])\n"
-                "except ValueError as exc:\n"
-                "    input_manifest['findings'].append({{'input': 'click-outside-image-probe', 'verdict': 'rejected', 'message': str(exc)}})\n"
-                "with open('outputs/{stem}_input_manifest.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(input_manifest, handle, indent=2, ensure_ascii=False)\n"
-                "print(json.dumps(input_manifest, indent=2))"
+                "train_manifest = validate_segmentation_dataset(train_records)\n"
+                "val_manifest = validate_segmentation_dataset(val_records)\n"
+                "overlap = set(r['id'] for r in train_records) & set(r['id'] for r in val_records)\n"
+                "if overlap:\n"
+                "    raise RuntimeError(f'train/validation leakage: {{sorted(overlap)}}')\n"
+                "dataset_manifest = {{'kind': dataset_kind, 'train': train_manifest, 'validation': val_manifest, 'overlap_ids': []}}\n"
+                "with open('outputs/{stem}_dataset_manifest.json', 'w', encoding='utf-8') as handle:\n"
+                "    json.dump(dataset_manifest, handle, indent=2)\n"
+                "print(json.dumps(dataset_manifest, indent=2))"
             ),
         },
         {
-            "md": (
-                "## 6. Segment one object and read the scores correctly\n\n"
-                "`segment` returns a dict with `masks` — a boolean array of shape `(K, H, W)` at input resolution, `K = 3` with "
-                "`multimask=True` else `1` — `iou_scores` (one per mask), the cleaned `points`, `point_labels` and `box`, "
-                "`multimask`, `width`, `height` and the model identity. Each `iou_scores` entry is the **model's own "
-                "prediction** of how well that candidate overlaps the intended object: a learned, **uncalibrated** estimate, "
-                "not a measured IoU and not a probability, produced by an unclipped regression head — **a value may exceed "
-                "1.0**. The conventional decision rule — used below and recorded in the evaluation report — is to keep the "
-                "candidate with the highest predicted IoU; the pipeline ships no threshold, does not choose for you, and the "
-                "caller owns any acceptance rule for their deployment. Masks are binarised at logit 0 (the processor default). "
-                "Inference is deterministic on a fixed device and dtype (no sampling, `torch.inference_mode`); CUDA kernel "
-                "selection can move scores in the third or fourth decimal place and, on ambiguous clicks, change which "
-                "candidate ranks first. As recorded in the model card, the repository's CPU smoke on this same scene and click "
-                "returned `iou_scores` of about `[0.010, 0.993, 0.400]` with a best-mask area of 12,220 px against the "
-                "rectangle's 12,221 px; that is one observation, not a calibration point."
-            ),
+            "md": "## 6. Measure the pretrained held-out baseline\n\nBefore any update, score the exact holdout and compare with the prompt-box baseline.",
             "code": (
-                "result = pipe.segment(image, points=points, point_labels=point_labels, multimask=MULTIMASK)\n"
-                "masks = result['masks']\n"
-                "best = int(np.argmax(result['iou_scores']))\n"
-                "best_mask = masks[best]\n"
-                "print({{'masks_shape': masks.shape, 'iou_scores_model_predicted': [round(v, 4) for v in result['iou_scores']], 'mask_areas_px': [int(m.sum()) for m in masks], 'best_candidate': best, 'device': pipe.device}})"
+                "base_eval = pipe.evaluate_adaptation(val_records)\n"
+                "print({{key: round(value, 6) if isinstance(value, float) else value for key, value in base_eval.items() if key != 'per_record_mask_iou'}})"
             ),
         },
         {
-            "md": (
-                "## 7. Evaluate → evaluation report\n\n"
-                "`evaluation_report` is the pipeline's public evaluation stage and always produces a report. No segmentation "
-                "metric is reported by default: mean IoU needs labelled masks, and this repository ships none. The "
-                "repository's only metric helper is `mask_iou(a, b)` (intersection-over-union of two boolean masks), the "
-                "primitive a caller would use to compute mIoU on their own labelled data; when a reference mask is supplied "
-                "the report carries one `mask_iou` entry per candidate — marking which candidate the decision rule selected — "
-                "with the verdict `sample-sanity`. On the synthetic path that reference is a rectangle **you drew yourself**, "
-                "so a high IoU proves only that the prompt contract, forward pass and up-sampling round-trip on a trivially "
-                "separable shape. On BYOD no reference exists, the verdict is `not-measurable`, and the report states what "
-                "would make the task measurable: hand-labelled masks on your own images averaged into a mean IoU over a "
-                "held-out set. The report also carries the model-predicted IoU scores and every candidate's area, and it is "
-                "written to `outputs/{stem}_evaluation_report.json`."
-            ),
+            "md": "## 7. Freeze the base and run bounded fine-tuning\n\nOnly the first mask-token output hypernetwork is trainable. AdamW runs two epochs with batch size one. A non-zero L2 weight delta is mandatory.",
             "code": (
-                "report = evaluation_report(result, reference_mask, sample_kind=sample_kind)\n"
+                "if not torch.cuda.is_available():\n"
+                "    raise RuntimeError('The canonical SAM2 E2E path requires a CUDA GPU')\n"
+                "parameter_counts = pipe.freeze_for_adaptation()\n"
+                "history = pipe.finetune(train_records, val_records, epochs=2, learning_rate=2e-5, seed=42)\n"
+                "print({{'parameters': parameter_counts, 'history': history, 'weight_delta_l2': pipe.adaptation_config['weight_delta_l2']}})"
+            ),
+        },
+        {
+            "md": "## 8. Evaluate the adapted model\n\nScore the untouched holdout after training. The report is sample-sanity, not benchmark evidence.",
+            "code": (
+                "adapted_eval = pipe.evaluate_adaptation(val_records)\n"
+                "evaluation_report_e2e = {{'task': 'promptable-image-segmentation-adaptation', 'verdict': 'sample-sanity', 'estimation': 'fixed generated held-out split', 'baseline_pretrained': base_eval, 'adapted': adapted_eval, 'weight_delta_l2': pipe.adaptation_config['weight_delta_l2']}}\n"
                 "with open('outputs/{stem}_evaluation_report.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(report, handle, indent=2, ensure_ascii=False)\n"
-                "print(json.dumps(report, indent=2))\n"
-                "if report['verdict'] == 'not-measurable':\n"
-                "    print('No reference mask exists for this input, so mask_iou is not computed; inspect the exported mask and overlay instead.')"
+                "    json.dump(evaluation_report_e2e, handle, indent=2)\n"
+                "print(json.dumps({{'baseline_mean_iou': base_eval['mean_mask_iou'], 'adapted_mean_iou': adapted_eval['mean_mask_iou'], 'box_baseline_mean_iou': adapted_eval['box_baseline_mean_iou']}}, indent=2))"
             ),
         },
         {
-            "md": (
-                "## 8. Export outputs and provenance\n\n"
-                "The best candidate mask is written as a 1-bit PNG (`outputs/{stem}_mask.png`) — the actual artifact a "
-                "downstream consumer wants — and an overlay PNG paints it over the input for visual inspection (a supplement "
-                "to, not a replacement for, the machine-readable files). JSON preserves every candidate's model-predicted IoU "
-                "and area, the chosen candidate, the prompt, the evaluation report, the input manifest, the sample identity and "
-                "digest, the notebook's source (repository, revision, embedded module digest, generator), the model identifier, "
-                "the immutable model revision, the model licence, and the runtime identity (Python, `torch`, `transformers`, "
-                "device). The boolean mask array itself is not embedded in the JSON — the PNG and its SHA-256 carry it. No "
-                "credentials are recorded."
-            ),
+            "md": "## 9. Infer on an unseen scene\n\nA horizontally flipped generated record, absent from both splits, exercises adapted serving.",
             "code": (
-                "Image.fromarray(best_mask).save('outputs/{stem}_mask.png')\n"
-                "overlay = np.asarray(image.convert('RGB')).copy()\n"
-                "overlay[best_mask] = (0.5 * overlay[best_mask] + 0.5 * np.array([0, 255, 0])).astype(np.uint8)\n"
-                "Image.fromarray(overlay, mode='RGB').save('outputs/{stem}_overlay.png')\n"
-                "payload = {{\n"
-                "    'prediction': {{key: value for key, value in result.items() if key != 'masks'}},\n"
-                "    'candidates': [{{'index': i, 'iou_score_model_predicted': float(result['iou_scores'][i]), 'area_px': int(masks[i].sum())}} for i in range(masks.shape[0])],\n"
-                "    'best_candidate': best,\n"
-                "    'mask_file': 'outputs/{stem}_mask.png',\n"
-                "    'mask_sha256': hashlib.sha256(np.packbits(best_mask).tobytes()).hexdigest(),\n"
-                "    'evaluation_report': report,\n"
-                "    'input_manifest': input_manifest,\n"
-                "    'sample': {{'kind': sample_kind, 'name': image_name, 'size': list(image.size), 'rgb_sha256': image_sha256, 'reference_mask_area_px': None if reference_mask is None else int(reference_mask.sum())}},\n"
-                "    'notebook_source': NOTEBOOK_SOURCE,\n"
-                "    'repository_revision': NOTEBOOK_SOURCE['repository_revision'],\n"
-                "    'model_id': MODEL_ID,\n"
-                "    'model_revision': MODEL_REVISION,\n"
-                "    'model_license': MODEL_LICENSE,\n"
-                "    'runtime': {{\n"
-                "        'python': platform.python_version(),\n"
-                "        'torch': torch.__version__,\n"
-                "        'transformers': transformers.__version__,\n"
-                "        'device': pipe.device,\n"
-                "    }},\n"
-                "}}\n"
+                "unseen = generated_records()[0].copy()\n"
+                "unseen['id'] = 'unseen-flipped'\n"
+                "unseen['image'] = unseen['image'].transpose(Image.Transpose.FLIP_LEFT_RIGHT)\n"
+                "unseen['mask'] = np.fliplr(unseen['mask']).copy()\n"
+                "ys, xs = np.where(unseen['mask'])\n"
+                "unseen.update({{'points': [[float(np.median(xs)), float(np.median(ys))]], 'point_labels': [1], 'box': [float(xs.min()), float(ys.min()), float(xs.max()+1), float(ys.max()+1)]}})\n"
+                "unseen_result = pipe.segment(unseen['image'], points=unseen['points'], point_labels=unseen['point_labels'], box=unseen['box'], multimask=False)\n"
+                "unseen_iou = mask_iou(unseen_result['masks'][0], unseen['mask'])\n"
+                "print({{'id': unseen['id'], 'mask_iou_sample_sanity': unseen_iou, 'model_iou_score': unseen_result['iou_scores'][0]}})"
+            ),
+        },
+        {
+            "md": "## 10. Export and verify a fresh reload\n\nExport SafeTensors plus a closed manifest. A fresh pinned base verifies the artifact; masks must match exactly and scores within the stated tolerance.",
+            "code": (
+                "artifact_dir = pipe.save_artifact('outputs/sam2-mask-hypernetwork-adapter-v1', producer_revision=NOTEBOOK_SOURCE['repository_revision'])\n"
+                "reloaded_pipe = SAM2SegmentationPipeline.from_artifact(artifact_dir, weights_dir=WEIGHTS_DIR)\n"
+                "reloaded_result = reloaded_pipe.segment(unseen['image'], points=unseen['points'], point_labels=unseen['point_labels'], box=unseen['box'], multimask=False)\n"
+                "if not np.array_equal(unseen_result['masks'], reloaded_result['masks']):\n"
+                "    raise RuntimeError('reloaded adapter changed the mask')\n"
+                "if not np.allclose(unseen_result['iou_scores'], reloaded_result['iou_scores'], rtol=1e-5, atol=1e-6):\n"
+                "    raise RuntimeError('reloaded adapter changed the score beyond tolerance')\n"
+                "reload_summary = {{'verification': 'PASSED', 'mask_exact': True, 'score_rtol': 1e-5, 'score_atol': 1e-6, 'artifact_dir': str(artifact_dir)}}\n"
+                "print(reload_summary)"
+            ),
+        },
+        {
+            "md": "## 11. Export provenance and terminal summary\n\nBind dataset fingerprints, hyperparameters, metrics, weight activity, base identity, runtime, and reload evidence without retaining records.",
+            "code": (
+                "payload = {{'dataset': dataset_manifest, 'adaptation': pipe.adaptation_config, 'evaluation': evaluation_report_e2e, 'unseen': {{'id': unseen['id'], 'mask_iou': unseen_iou}}, 'artifact': reload_summary, 'notebook_source': NOTEBOOK_SOURCE, 'repository_revision': NOTEBOOK_SOURCE['repository_revision'], 'base_model': {{'id': MODEL_ID, 'revision': MODEL_REVISION}}, 'runtime': {{'python': platform.python_version(), 'torch': torch.__version__, 'transformers': transformers.__version__, 'device': pipe.device}}}}\n"
                 "with open('outputs/{stem}_result.json', 'w', encoding='utf-8') as handle:\n"
-                "    json.dump(payload, handle, indent=2, ensure_ascii=False)\n"
-                "print(sorted(os.listdir('outputs')))"
+                "    json.dump(payload, handle, indent=2)\n"
+                "print({{'status': 'E2E COMPLETE', 'train_records': len(train_records), 'held_out_records': len(val_records), 'optimizer_steps': sum(item['optimizer_steps'] for item in history), 'weight_delta_l2': pipe.adaptation_config['weight_delta_l2'], 'reload': reload_summary['verification'], 'outputs': sorted(os.listdir('outputs'))}})"
             ),
         },
     ],
     "closing": (
         "## Interpretation and limits\n\n"
-        "The masks are the model's answer to *your* prompt: a click that is ambiguous returns candidates at several "
-        "granularities, and the `iou_scores` used to rank them are the model's own uncalibrated estimates, not measured "
-        "overlaps, and can exceed 1.0. On the synthetic scene the `mask_iou` values in the evaluation report compare "
-        "candidates with a rectangle you drew yourself and the verdict is `sample-sanity`, which proves only that the input "
-        "contract, prompt validation, forward pass and up-sampling work on a trivially separable shape; it says nothing about "
-        "photographs, thin structures, transparent or occluded objects, or clicks near a boundary, and a BYOD result is a "
-        "single-image observation with the verdict `not-measurable`. One object per call, image mode only, no text prompts, no "
-        "class labels. The pipeline provides no video tracking, automatic segmentation, mIoU evaluation, or training "
-        "capability.\n\n"
-        "Successful execution proves that the recorded repository revision's pipeline module, carried in this notebook, can "
-        "acquire and digest-verify the pinned model, validate the demonstrated request, execute the public pipeline path, and "
-        "emit the shown machine-readable outputs in the tested runtime — without the repository being reachable. It does "
-        "**not** establish benchmark superiority, deployment calibration, safety for high-consequence decisions, or production "
-        "fitness on an unseen domain.\n\n"
-        "**Next experiments:** set `MULTIMASK = False` and compare the single mask with the best candidate; prompt the disc "
-        "with a box instead of a click (`pipe.segment(image, box=[200, 80, 281, 161], multimask=False)`) and compare its area "
-        "with the disc's (about 5,026 px in the smoke run); add a background click (label 0) inside the rectangle after a "
-        "foreground click on the disc to see the mask exclude it; enable `USE_BYOD` with a photograph, hand-draw one reference "
-        "mask and pass it to `evaluation_report` to see the verdict switch to `sample-sanity` — the first step towards a real "
-        "mIoU.\n\n"
+        "This run proves the exact notebook can validate paired masks, update the declared adapter surface, score a held-out "
+        "generated split, serialize only the adapter, attach it to the exact pinned base, and reproduce inference after "
+        "reload. It does not prove improvement on photographs or any deployment domain. Real use requires rights-cleared "
+        "representative images, human-reviewed masks, leakage-safe splits, and boundary-error analysis.\n\n"
+        "Successful execution proves that the recorded repository revision can complete this bounded tutorial without the repository being reachable at runtime. It does **not** establish benchmark superiority or production fitness.\n\n"
         "## References\n\n"
-        "- Repository README: https://github.com/kurtvalcorza/sam2-segmentation-pipeline/blob/main/README.md\n"
+        "- Repository: https://github.com/kurtvalcorza/sam2-segmentation-pipeline\n"
         "- Repository model card: https://github.com/kurtvalcorza/sam2-segmentation-pipeline/blob/main/MODEL_CARD.md\n"
-        "- Weight provenance: https://github.com/kurtvalcorza/sam2-segmentation-pipeline/blob/main/docs/WEIGHTS.md\n"
         "- Upstream model: https://huggingface.co/{MODEL_ID}\n"
-        "- Upstream code: https://github.com/facebookresearch/sam2\n"
-        "- SAM 2: Segment Anything in Images and Videos (Ravi et al., 2024): https://arxiv.org/abs/2408.00714"
+        "- SAM 2 paper: https://arxiv.org/abs/2408.00714"
     ),
 }

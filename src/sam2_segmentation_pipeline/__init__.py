@@ -14,6 +14,7 @@ from .pipeline import (
     mask_iou,
     stage_missing_files,
     validate_inputs,
+    validate_segmentation_dataset,
     verify_snapshot,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
     "mask_iou",
     "stage_missing_files",
     "validate_inputs",
+    "validate_segmentation_dataset",
     "verify_snapshot",
 ]

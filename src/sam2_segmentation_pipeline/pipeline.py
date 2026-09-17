@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,12 @@ MODEL_LICENSE = "apache-2.0"
 MODEL_KEY = "sam2.1-hiera-small"
 DEFAULT_WEIGHTS_DIR = Path(__file__).resolve().parents[2] / "weights" / MODEL_KEY
 MANIFEST_NAME = "dimer-base-manifest.json"
+ARTIFACT_FORMAT = "org.valcorza.sam2.mask-decoder-adapter"
+ARTIFACT_FORMAT_VERSION = "1.0"
+ARTIFACT_MANIFEST_NAME = "manifest.json"
+ARTIFACT_WEIGHTS_NAME = "adapter.safetensors"
+TRAINABLE_PREFIXES = ("mask_decoder.output_hypernetworks_mlps.0.",)
+MAX_ADAPTATION_RECORDS = 128
 
 # Input ceilings. The processor resizes every image to 1024x1024 (preprocessor_config.json), so model cost is
 # fixed; the caller's resolution only sets the size of the up-sampled output masks. Prompts are one object per
@@ -246,8 +253,6 @@ def validate_inputs(
         "model_id": MODEL_ID,
         "model_revision": MODEL_REVISION,
     }
-
-
 def evaluation_report(
     result: Mapping[str, Any],
     reference_mask: Any = None,
@@ -320,6 +325,58 @@ def evaluation_report(
     }
 
 
+def validate_segmentation_dataset(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Validate paired images, prompts, and boolean masks for bounded adaptation."""
+    if isinstance(records, str | bytes) or not isinstance(records, Sequence):
+        raise TypeError("records must be a sequence of mappings")
+    if not 2 <= len(records) <= MAX_ADAPTATION_RECORDS:
+        raise ValueError(f"record count {len(records)} outside 2..{MAX_ADAPTATION_RECORDS}")
+
+    ids: list[str] = []
+    digest = hashlib.sha256()
+    positive_pixels = 0
+    for index, record in enumerate(records):
+        if not isinstance(record, Mapping):
+            raise TypeError(f"record {index} must be a mapping")
+        record_id = record.get("id")
+        if not isinstance(record_id, str) or not record_id.strip():
+            raise ValueError(f"record {index} id must be a non-empty string")
+        if record_id in ids:
+            raise ValueError(f"duplicate record id: {record_id}")
+        ids.append(record_id)
+
+        image = validate_image(record.get("image"))
+        mask = np.asarray(record.get("mask"))
+        if mask.dtype != np.bool_:
+            raise TypeError(f"record {record_id} mask must be boolean")
+        if mask.shape != (image.height, image.width):
+            raise ValueError(
+                f"record {record_id} mask shape {mask.shape} != image {(image.height, image.width)}"
+            )
+        area = int(mask.sum())
+        if area == 0 or area == mask.size:
+            raise ValueError(f"record {record_id} mask must contain foreground and background")
+        validate_prompts(
+            image.width,
+            image.height,
+            record.get("points"),
+            record.get("point_labels"),
+            record.get("box"),
+        )
+        positive_pixels += area
+        digest.update(record_id.encode("utf-8"))
+        digest.update(np.asarray(image, dtype=np.uint8).tobytes())
+        digest.update(mask.tobytes())
+
+    return {
+        "records": len(records),
+        "unique_ids": len(ids),
+        "positive_pixels": positive_pixels,
+        "dataset_sha256": digest.hexdigest(),
+        "verdict": "accepted",
+    }
+
+
 @dataclass
 class SAM2SegmentationPipeline:
     """Promptable image segmentation (points/box -> masks) over the pinned SAM 2.1 Hiera-Small checkpoint.
@@ -328,6 +385,9 @@ class SAM2SegmentationPipeline:
 
     _runner: Callable[..., tuple[np.ndarray, list[float]]]
     device: str
+    model: Any | None = None
+    processor: Any | None = None
+    adaptation_config: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_pretrained(
@@ -374,7 +434,315 @@ class SAM2SegmentationPipeline:
             )[0]
             return masks[0].numpy().astype(np.bool_), [float(v) for v in outputs.iou_scores[0, 0].tolist()]
 
-        return cls(runner, resolved_device)
+        return cls(runner, resolved_device, model=model, processor=processor)
+
+    def freeze_for_adaptation(self) -> dict[str, int]:
+        """Freeze the base model and enable the first mask-token hypernetwork only."""
+        if self.model is None:
+            raise RuntimeError("cannot configure adaptation without an underlying torch model")
+        trainable = frozen = 0
+        for name, parameter in self.model.named_parameters():
+            parameter.requires_grad = name.startswith(TRAINABLE_PREFIXES)
+            if parameter.requires_grad:
+                trainable += parameter.numel()
+            else:
+                frozen += parameter.numel()
+        if trainable == 0:
+            raise RuntimeError("SAM2 adaptation selected no trainable parameters")
+        self.adaptation_config = {
+            "method": "frozen-backbone-mask-hypernetwork-gradient-adaptation",
+            "trainable_prefixes": list(TRAINABLE_PREFIXES),
+            "trainable_parameters": trainable,
+            "frozen_parameters": frozen,
+        }
+        return {"trainable_parameters": trainable, "frozen_parameters": frozen}
+
+    def finetune(
+        self,
+        train_records: Sequence[Mapping[str, Any]],
+        val_records: Sequence[Mapping[str, Any]] | None = None,
+        *,
+        epochs: int = 2,
+        learning_rate: float = 2e-5,
+        seed: int = 42,
+    ) -> list[dict[str, Any]]:
+        """Run bounded mask-hypernetwork fine-tuning with BCE plus soft-Dice loss."""
+        import random
+
+        import torch
+        import torch.nn.functional as F
+        from torch.optim import AdamW
+
+        if self.model is None or self.processor is None:
+            raise RuntimeError("cannot fine-tune without the underlying model and processor")
+        if isinstance(epochs, bool) or not isinstance(epochs, int) or not 1 <= epochs <= 20:
+            raise ValueError("epochs must be an int in 1..20")
+        if not isinstance(learning_rate, int | float) or isinstance(learning_rate, bool):
+            raise TypeError("learning_rate must be numeric")
+        if not 0 < float(learning_rate) <= 1e-2:
+            raise ValueError("learning_rate must be in (0, 1e-2]")
+        train_manifest = validate_segmentation_dataset(train_records)
+        val_manifest = validate_segmentation_dataset(val_records) if val_records else None
+        if not self.adaptation_config:
+            self.freeze_for_adaptation()
+        if any(
+            parameter.requires_grad and not name.startswith(TRAINABLE_PREFIXES)
+            for name, parameter in self.model.named_parameters()
+        ):
+            raise RuntimeError("parameters outside the declared SAM2 adapter surface are trainable")
+
+        torch.manual_seed(seed)
+        device = torch.device(self.device)
+        self.model.to(device).eval()
+        trainable = {
+            name: parameter
+            for name, parameter in self.model.named_parameters()
+            if parameter.requires_grad
+        }
+        if not trainable:
+            raise RuntimeError("model has no trainable parameters")
+        before = {name: parameter.detach().cpu().clone() for name, parameter in trainable.items()}
+        optimizer = AdamW(list(trainable.values()), lr=float(learning_rate))
+
+        def prepare(
+            record: Mapping[str, Any],
+        ) -> tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor]:
+            prompt_kwargs: dict[str, Any] = {}
+            if record.get("points") is not None:
+                prompt_kwargs["input_points"] = [[record["points"]]]
+                prompt_kwargs["input_labels"] = [[record["point_labels"]]]
+            if record.get("box") is not None:
+                prompt_kwargs["input_boxes"] = [[record["box"]]]
+            batch = self.processor(
+                images=record["image"], return_tensors="pt", **prompt_kwargs
+            ).to(device)
+            with torch.inference_mode():
+                embeddings = [
+                    item.detach() for item in self.model.get_image_embeddings(batch["pixel_values"])
+                ]
+            prompts = {
+                key: batch[key]
+                for key in ("input_points", "input_labels", "input_boxes")
+                if key in batch
+            }
+            target = torch.from_numpy(np.asarray(record["mask"], dtype=np.float32)).to(device)
+            return embeddings, prompts, target
+
+        cached_train = [prepare(record) for record in train_records]
+        cached_val = [prepare(record) for record in val_records] if val_records else []
+
+        def score(
+            cached: Sequence[tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor]],
+        ) -> float:
+            values: list[float] = []
+            self.model.eval()
+            with torch.inference_mode():
+                for embeddings, prompts, target in cached:
+                    logits = self.model(
+                        image_embeddings=embeddings, multimask_output=False, **prompts
+                    ).pred_masks[0, 0, 0]
+                    target_low = F.interpolate(
+                        target[None, None], size=logits.shape, mode="nearest"
+                    )[0, 0].bool()
+                    values.append(mask_iou((logits > MASK_THRESHOLD).cpu().numpy(), target_low.cpu().numpy()))
+            return float(np.mean(values)) if values else 0.0
+
+        history: list[dict[str, Any]] = []
+        baseline_val_iou = score(cached_val) if cached_val else None
+        for epoch in range(1, epochs + 1):
+            order = list(range(len(cached_train)))
+            random.Random(seed + epoch * 17).shuffle(order)
+            total_loss = 0.0
+            for index in order:
+                embeddings, prompts, target = cached_train[index]
+                optimizer.zero_grad(set_to_none=True)
+                logits = self.model(
+                    image_embeddings=embeddings, multimask_output=False, **prompts
+                ).pred_masks[0, 0, 0]
+                target_low = F.interpolate(target[None, None], size=logits.shape, mode="nearest")[0, 0]
+                probabilities = logits.sigmoid()
+                bce = F.binary_cross_entropy_with_logits(logits, target_low)
+                dice = 1.0 - (2.0 * (probabilities * target_low).sum() + 1.0) / (
+                    probabilities.sum() + target_low.sum() + 1.0
+                )
+                loss = bce + dice
+                loss.backward()
+                optimizer.step()
+                total_loss += float(loss.item())
+            epoch_data: dict[str, Any] = {
+                "epoch": epoch,
+                "train_loss": round(total_loss / len(cached_train), 6),
+                "optimizer_steps": len(cached_train),
+            }
+            if cached_val:
+                epoch_data["val_mask_iou"] = round(score(cached_val), 6)
+            history.append(epoch_data)
+
+        delta_sq = 0.0
+        for name, parameter in trainable.items():
+            delta_sq += float(torch.sum((parameter.detach().cpu() - before[name]) ** 2).item())
+        weight_delta_l2 = delta_sq**0.5
+        if weight_delta_l2 == 0.0:
+            raise RuntimeError("fine-tuning completed without changing adapter weights")
+        self.model.eval()
+        self.adaptation_config.update(
+            {
+                "epochs": epochs,
+                "learning_rate": float(learning_rate),
+                "batch_size": 1,
+                "seed": seed,
+                "loss": "binary-cross-entropy-plus-soft-dice",
+                "train_manifest": train_manifest,
+                "validation_manifest": val_manifest,
+                "baseline_validation_mask_iou": baseline_val_iou,
+                "history": history,
+                "weight_delta_l2": weight_delta_l2,
+            }
+        )
+        return history
+
+    def evaluate_adaptation(self, records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        """Evaluate adapted masks against ground truth and a prompt-box baseline."""
+        validate_segmentation_dataset(records)
+        model_ious: list[float] = []
+        box_ious: list[float] = []
+        for record in records:
+            result = self.segment(
+                record["image"],
+                points=record.get("points"),
+                point_labels=record.get("point_labels"),
+                box=record.get("box"),
+                multimask=False,
+            )
+            target = np.asarray(record["mask"], dtype=np.bool_)
+            model_ious.append(mask_iou(result["masks"][0], target))
+            baseline = np.zeros_like(target)
+            box = record.get("box")
+            if box is not None:
+                x0, y0, x1, y1 = (int(round(value)) for value in box)
+                baseline[y0:y1, x0:x1] = True
+            box_ious.append(mask_iou(baseline, target))
+        return {
+            "records": len(records),
+            "mean_mask_iou": float(np.mean(model_ious)),
+            "per_record_mask_iou": model_ious,
+            "box_baseline_mean_iou": float(np.mean(box_ious)),
+            "delta_over_box_baseline": float(np.mean(model_ious) - np.mean(box_ious)),
+        }
+
+    def save_artifact(self, output_dir: str | Path, *, producer_revision: str) -> Path:
+        """Write a safe mask-hypernetwork adapter plus a closed integrity manifest."""
+        from safetensors.torch import save_file
+
+        if self.model is None or not self.adaptation_config:
+            raise RuntimeError("artifact export requires an adapted model")
+        if len(producer_revision) != 40 or any(ch not in "0123456789abcdef" for ch in producer_revision):
+            raise ValueError("producer_revision must be a lowercase 40-hex Git commit")
+        root = Path(output_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        if any(root.iterdir()):
+            raise FileExistsError(f"artifact directory is not empty: {root}")
+        state = {
+            name: tensor.detach().cpu().contiguous()
+            for name, tensor in self.model.state_dict().items()
+            if name.startswith(TRAINABLE_PREFIXES)
+        }
+        if not state:
+            raise RuntimeError("no adapter tensors selected for export")
+        weights_path = root / ARTIFACT_WEIGHTS_NAME
+        save_file(state, str(weights_path))
+        manifest = {
+            "artifactSpec": "1.0",
+            "format": ARTIFACT_FORMAT,
+            "formatVersion": ARTIFACT_FORMAT_VERSION,
+            "artifactClass": "ADAPTER",
+            "artifactKind": "sam2-mask-hypernetwork-adapter",
+            "producer": {"pipelineId": "sam2-segmentation-pipeline", "revision": producer_revision},
+            "createdAtUtc": datetime.now(UTC).isoformat(),
+            "baseModel": {"id": MODEL_ID, "revision": MODEL_REVISION},
+            "files": [
+                {
+                    "path": ARTIFACT_WEIGHTS_NAME,
+                    "bytes": weights_path.stat().st_size,
+                    "sha256": _sha256(weights_path),
+                }
+            ],
+            "adaptation": dict(self.adaptation_config),
+            "trainablePrefixes": list(TRAINABLE_PREFIXES),
+            "retainedData": {"containsTrainingRecords": False, "containsSupportRecords": False},
+            "serialization": "safetensors",
+        }
+        (root / ARTIFACT_MANIFEST_NAME).write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        return root
+
+    def load_artifact(self, artifact_dir: str | Path) -> dict[str, Any]:
+        """Verify and load a SAM2 adapter without code-capable deserialization."""
+        from safetensors.torch import load_file
+
+        if self.model is None:
+            raise RuntimeError("cannot load an artifact without an underlying torch model")
+        root = Path(artifact_dir)
+        manifest_path = root / ARTIFACT_MANIFEST_NAME
+        if not manifest_path.is_file():
+            raise FileNotFoundError(f"artifact manifest not found: {manifest_path}")
+        expected_files = {ARTIFACT_MANIFEST_NAME, ARTIFACT_WEIGHTS_NAME}
+        actual_files = {path.name for path in root.iterdir() if path.is_file()}
+        if actual_files != expected_files:
+            raise ValueError(
+                f"artifact directory must contain exactly {sorted(expected_files)}, "
+                f"found {sorted(actual_files)}"
+            )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("format") != ARTIFACT_FORMAT:
+            raise ValueError(f"unrecognized artifact format: {manifest.get('format')}")
+        if manifest.get("formatVersion") != ARTIFACT_FORMAT_VERSION:
+            raise ValueError(f"unsupported artifact formatVersion: {manifest.get('formatVersion')}")
+        if manifest.get("baseModel") != {"id": MODEL_ID, "revision": MODEL_REVISION}:
+            raise ValueError("artifact base model identity is incompatible")
+        if manifest.get("trainablePrefixes") != list(TRAINABLE_PREFIXES):
+            raise ValueError("artifact trainable prefixes do not match this pipeline")
+        files = manifest.get("files")
+        if not isinstance(files, list) or len(files) != 1:
+            raise ValueError("artifact manifest must inventory exactly one weights file")
+        entry = files[0]
+        if entry.get("path") != ARTIFACT_WEIGHTS_NAME:
+            raise ValueError("artifact manifest names an unexpected weights path")
+        weights_path = root / ARTIFACT_WEIGHTS_NAME
+        if not weights_path.is_file():
+            raise FileNotFoundError(f"artifact weights not found: {weights_path}")
+        if weights_path.stat().st_size != entry.get("bytes") or _sha256(weights_path) != entry.get("sha256"):
+            raise ValueError("artifact weights failed size or SHA-256 verification")
+        state = load_file(str(weights_path), device=self.device)
+        expected = {
+            name for name in self.model.state_dict() if name.startswith(TRAINABLE_PREFIXES)
+        }
+        if set(state) != expected:
+            raise ValueError("artifact tensor inventory does not match the declared adapter surface")
+        self.model.load_state_dict(state, strict=False)
+        self.model.to(self.device).eval()
+        adaptation = manifest.get("adaptation")
+        if not isinstance(adaptation, dict):
+            raise ValueError("artifact adaptation metadata must be a mapping")
+        self.adaptation_config = dict(adaptation)
+        return manifest
+
+    @classmethod
+    def from_artifact(
+        cls,
+        artifact_dir: str | Path,
+        *,
+        device: str | None = None,
+        weights_dir: str | Path | None = None,
+        allow_download: bool = False,
+    ) -> SAM2SegmentationPipeline:
+        """Construct a fresh pinned base model and attach a verified adapter."""
+        pipeline = cls.from_pretrained(
+            device=device, weights_dir=weights_dir, allow_download=allow_download
+        )
+        pipeline.load_artifact(artifact_dir)
+        return pipeline
 
     def segment(
         self,
