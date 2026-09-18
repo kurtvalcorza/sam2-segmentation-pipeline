@@ -279,6 +279,24 @@ def test_interrupted_retraining_restores_weights_and_completion_metadata(monkeyp
             assert torch.equal(parameter, before[name])
 
 
+def test_interrupted_initial_preprocessing_restores_entry_state(monkeypatch):
+    pipeline = _pipeline()
+    requires_grad = {
+        name: parameter.requires_grad for name, parameter in pipeline.model.named_parameters()
+    }
+
+    def interrupted_preprocessing(_processor, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_Processor, "__call__", interrupted_preprocessing)
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.finetune(_records()[:2], epochs=1, learning_rate=1e-2)
+    assert pipeline.adaptation_config == {}
+    assert {
+        name: parameter.requires_grad for name, parameter in pipeline.model.named_parameters()
+    } == requires_grad
+
+
 def test_finetune_rejects_train_validation_overlap_by_id_or_content():
     records = _records()
     with pytest.raises(ValueError, match="overlap by id"):

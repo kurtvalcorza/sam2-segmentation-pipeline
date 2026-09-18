@@ -160,3 +160,32 @@ def test_byod_supports_an_attached_kaggle_zip_without_colab(notebook: dict, tmp_
             compile(oversized_code, "<notebook-oversized-byod-cell>", "exec"),
             {"MIN_IMAGE_SIDE": 16, "MAX_IMAGE_SIDE": 4096},
         )
+
+    aggregate_code = next(
+        _source(cell)
+        for cell in _cells(notebook, "code")
+        if "def load_byod_zip" in _source(cell)
+    )
+    aggregate_code = (
+        aggregate_code.replace("USE_BYOD = False", "USE_BYOD = True", 1)
+        .replace("BYOD_ZIP_PATH = ''", f"BYOD_ZIP_PATH = {str(archive_path)!r}", 1)
+        .replace("BYOD_MAX_TOTAL_PIXELS = 32 * 1024 * 1024", "BYOD_MAX_TOTAL_PIXELS = 1024", 1)
+    )
+    with pytest.raises(ValueError, match="total decoded pixel"):
+        exec(
+            compile(aggregate_code, "<notebook-aggregate-byod-cell>", "exec"),
+            {"MIN_IMAGE_SIDE": 16, "MAX_IMAGE_SIDE": 4096},
+        )
+
+
+def test_artifact_export_cell_replaces_only_its_owned_directory(notebook: dict) -> None:
+    export_code = next(
+        _source(cell)
+        for cell in _cells(notebook, "code")
+        if "pipe.save_artifact" in _source(cell)
+    )
+    assert "artifact_dir = Path('outputs/sam2-mask-hypernetwork-adapter-v1')" in export_code
+    assert "shutil.rmtree(artifact_dir)" in export_code
+    assert export_code.index("shutil.rmtree(artifact_dir)") < export_code.index(
+        "pipe.save_artifact"
+    )

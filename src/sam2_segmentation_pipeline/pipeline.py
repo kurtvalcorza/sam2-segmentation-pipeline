@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -701,27 +702,22 @@ class SAM2SegmentationPipeline:
             }
             if train_content & val_content:
                 raise ValueError("train and validation records overlap by image/mask content")
-        if not self.adaptation_config:
-            self.freeze_for_adaptation()
-        if any(
-            parameter.requires_grad and not name.startswith(TRAINABLE_PREFIXES)
-            for name, parameter in self.model.named_parameters()
-        ):
-            raise RuntimeError("parameters outside the declared SAM2 adapter surface are trainable")
+
+        entry_config = copy.deepcopy(self.adaptation_config)
+        entry_requires_grad = {
+            name: parameter.requires_grad for name, parameter in self.model.named_parameters()
+        }
+        entry_training = self.model.training
+
+        def restore_entry_state() -> None:
+            self.adaptation_config = copy.deepcopy(entry_config)
+            for name, parameter in self.model.named_parameters():
+                parameter.requires_grad = entry_requires_grad[name]
+            self.model.train(entry_training)
 
         torch.manual_seed(seed)
         device = torch.device(self.device)
         self.model.to(device).eval()
-        trainable = {
-            name: parameter
-            for name, parameter in self.model.named_parameters()
-            if parameter.requires_grad
-        }
-        if not trainable:
-            raise RuntimeError("model has no trainable parameters")
-        before = {name: parameter.detach().cpu().clone() for name, parameter in trainable.items()}
-        optimizer = AdamW(list(trainable.values()), lr=float(learning_rate))
-
         def prepare(
             record: Mapping[str, Any],
         ) -> tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
@@ -748,9 +744,6 @@ class SAM2SegmentationPipeline:
             original_size = torch.tensor([[record["image"].height, record["image"].width]])
             return embeddings, prompts, target, original_size
 
-        cached_train = [prepare(record) for record in train_records]
-        cached_val = [prepare(record) for record in val_records] if val_records else []
-
         def score(
             cached: Sequence[
                 tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor, torch.Tensor]
@@ -776,37 +769,67 @@ class SAM2SegmentationPipeline:
                     values.append(mask_iou(public_mask.numpy(), device_target.cpu().numpy().astype(bool)))
             return float(np.mean(values)) if values else 0.0
 
+        try:
+            cached_train = [prepare(record) for record in train_records]
+            cached_val = [prepare(record) for record in val_records] if val_records else []
+            baseline_val_iou = score(cached_val) if cached_val else None
+        except BaseException:
+            restore_entry_state()
+            raise
+
+        try:
+            if not self.adaptation_config:
+                self.freeze_for_adaptation()
+            if any(
+                parameter.requires_grad and not name.startswith(TRAINABLE_PREFIXES)
+                for name, parameter in self.model.named_parameters()
+            ):
+                raise RuntimeError("parameters outside the declared SAM2 adapter surface are trainable")
+            trainable = {
+                name: parameter
+                for name, parameter in self.model.named_parameters()
+                if parameter.requires_grad
+            }
+            if not trainable:
+                raise RuntimeError("model has no trainable parameters")
+            before = {
+                name: parameter.detach().cpu().clone() for name, parameter in trainable.items()
+            }
+            optimizer = AdamW(list(trainable.values()), lr=float(learning_rate))
+            previous_config = copy.deepcopy(self.adaptation_config)
+            prior_runs = previous_config.get("training_runs")
+            if prior_runs is None:
+                prior_runs = (
+                    [_adaptation_run_snapshot(previous_config)]
+                    if _is_positive_finite_number(previous_config.get("weight_delta_l2"))
+                    and isinstance(previous_config.get("history"), list)
+                    and previous_config["history"]
+                    else []
+                )
+            elif not isinstance(prior_runs, list) or not all(
+                isinstance(run, Mapping) for run in prior_runs
+            ):
+                raise RuntimeError("adaptation training_runs metadata is malformed")
+            else:
+                prior_runs = [json.loads(json.dumps(run)) for run in prior_runs]
+            for key in (
+                "epochs",
+                "learning_rate",
+                "batch_size",
+                "seed",
+                "loss",
+                "train_manifest",
+                "validation_manifest",
+                "baseline_validation_mask_iou",
+                "history",
+                "weight_delta_l2",
+            ):
+                self.adaptation_config.pop(key, None)
+        except BaseException:
+            restore_entry_state()
+            raise
+
         history: list[dict[str, Any]] = []
-        baseline_val_iou = score(cached_val) if cached_val else None
-        previous_config = dict(self.adaptation_config)
-        prior_runs = previous_config.get("training_runs")
-        if prior_runs is None:
-            prior_runs = (
-                [_adaptation_run_snapshot(previous_config)]
-                if _is_positive_finite_number(previous_config.get("weight_delta_l2"))
-                and isinstance(previous_config.get("history"), list)
-                and previous_config["history"]
-                else []
-            )
-        elif not isinstance(prior_runs, list) or not all(
-            isinstance(run, Mapping) for run in prior_runs
-        ):
-            raise RuntimeError("adaptation training_runs metadata is malformed")
-        else:
-            prior_runs = [json.loads(json.dumps(run)) for run in prior_runs]
-        for key in (
-            "epochs",
-            "learning_rate",
-            "batch_size",
-            "seed",
-            "loss",
-            "train_manifest",
-            "validation_manifest",
-            "baseline_validation_mask_iou",
-            "history",
-            "weight_delta_l2",
-        ):
-            self.adaptation_config.pop(key, None)
         try:
             for epoch in range(1, epochs + 1):
                 order = list(range(len(cached_train)))
@@ -887,8 +910,7 @@ class SAM2SegmentationPipeline:
             with torch.no_grad():
                 for name, parameter in trainable.items():
                     parameter.copy_(before[name].to(device=parameter.device, dtype=parameter.dtype))
-            self.adaptation_config = previous_config
-            self.model.eval()
+            restore_entry_state()
             raise
         return json.loads(json.dumps(history))
 
