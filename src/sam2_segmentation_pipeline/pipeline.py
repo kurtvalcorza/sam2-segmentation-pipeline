@@ -23,7 +23,21 @@ ARTIFACT_FORMAT_VERSION = "1.0"
 ARTIFACT_MANIFEST_NAME = "manifest.json"
 ARTIFACT_WEIGHTS_NAME = "adapter.safetensors"
 TRAINABLE_PREFIXES = ("mask_decoder.output_hypernetworks_mlps.0.",)
+ADAPTATION_METHOD = "frozen-backbone-mask-hypernetwork-gradient-adaptation"
 MAX_ADAPTATION_RECORDS = 128
+
+_ADAPTATION_RUN_FIELDS = (
+    "epochs",
+    "learning_rate",
+    "batch_size",
+    "seed",
+    "loss",
+    "train_manifest",
+    "validation_manifest",
+    "baseline_validation_mask_iou",
+    "history",
+    "weight_delta_l2",
+)
 
 # Input ceilings. The processor resizes every image to 1024x1024 (preprocessor_config.json), so model cost is
 # fixed; the caller's resolution only sets the size of the up-sampled output masks. Prompts are one object per
@@ -41,6 +55,63 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _is_positive_finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value > 0
+    )
+
+
+def _validate_completed_adaptation_metadata(adaptation: Any) -> None:
+    """Reject metadata that cannot identify a completed adapter before weights are applied."""
+    if not isinstance(adaptation, Mapping):
+        raise ValueError("artifact adaptation metadata must be a mapping")
+    if adaptation.get("method") != ADAPTATION_METHOD:
+        raise ValueError("artifact adaptation metadata has an unsupported or missing method")
+    if adaptation.get("trainable_prefixes") != list(TRAINABLE_PREFIXES):
+        raise ValueError("artifact adaptation metadata has incomplete trainable prefixes")
+    trainable = adaptation.get("trainable_parameters")
+    frozen = adaptation.get("frozen_parameters")
+    if not isinstance(trainable, int) or isinstance(trainable, bool) or trainable <= 0:
+        raise ValueError("artifact adaptation metadata has invalid trainable parameter count")
+    if not isinstance(frozen, int) or isinstance(frozen, bool) or frozen < 0:
+        raise ValueError("artifact adaptation metadata has invalid frozen parameter count")
+    if not _is_positive_finite_number(adaptation.get("weight_delta_l2")):
+        raise ValueError("artifact adaptation metadata requires a positive finite weight delta")
+    history = adaptation.get("history")
+    if not isinstance(history, list) or not history or not all(isinstance(item, Mapping) for item in history):
+        raise ValueError("artifact adaptation metadata requires non-empty training history")
+    training_runs = adaptation.get("training_runs")
+    if training_runs is not None:
+        if not isinstance(training_runs, list) or not training_runs:
+            raise ValueError("artifact adaptation metadata training_runs must be a non-empty list")
+        for run in training_runs:
+            if not isinstance(run, Mapping):
+                raise ValueError("artifact adaptation metadata training_runs entries must be mappings")
+            run_history = run.get("history")
+            if not _is_positive_finite_number(run.get("weight_delta_l2")) or not isinstance(
+                run_history, list
+            ) or not run_history:
+                raise ValueError("artifact adaptation metadata contains an incomplete training run")
+    artifact_lineage = adaptation.get("artifact_lineage")
+    if artifact_lineage is not None and (
+        not isinstance(artifact_lineage, list)
+        or not all(isinstance(item, Mapping) for item in artifact_lineage)
+    ):
+        raise ValueError("artifact adaptation metadata artifact_lineage must be a list of mappings")
+
+
+def _adaptation_run_snapshot(adaptation: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy the per-run fields retained in cumulative adapter provenance."""
+    return {
+        key: json.loads(json.dumps(adaptation[key]))
+        for key in _ADAPTATION_RUN_FIELDS
+        if key in adaptation
+    }
 
 
 def verify_snapshot(path: str | Path | None = None) -> dict[str, Any]:
@@ -500,7 +571,7 @@ class SAM2SegmentationPipeline:
         if trainable == 0:
             raise RuntimeError("SAM2 adaptation selected no trainable parameters")
         self.adaptation_config = {
-            "method": "frozen-backbone-mask-hypernetwork-gradient-adaptation",
+            "method": ADAPTATION_METHOD,
             "trainable_prefixes": list(TRAINABLE_PREFIXES),
             "trainable_parameters": trainable,
             "frozen_parameters": frozen,
@@ -627,6 +698,21 @@ class SAM2SegmentationPipeline:
         history: list[dict[str, Any]] = []
         baseline_val_iou = score(cached_val) if cached_val else None
         previous_config = dict(self.adaptation_config)
+        prior_runs = previous_config.get("training_runs")
+        if prior_runs is None:
+            prior_runs = (
+                [_adaptation_run_snapshot(previous_config)]
+                if _is_positive_finite_number(previous_config.get("weight_delta_l2"))
+                and isinstance(previous_config.get("history"), list)
+                and previous_config["history"]
+                else []
+            )
+        elif not isinstance(prior_runs, list) or not all(
+            isinstance(run, Mapping) for run in prior_runs
+        ):
+            raise RuntimeError("adaptation training_runs metadata is malformed")
+        else:
+            prior_runs = [json.loads(json.dumps(run)) for run in prior_runs]
         for key in (
             "epochs",
             "learning_rate",
@@ -698,20 +784,20 @@ class SAM2SegmentationPipeline:
             if weight_delta_l2 == 0.0:
                 raise RuntimeError("fine-tuning completed without changing adapter weights")
             self.model.eval()
-            self.adaptation_config.update(
-                {
-                    "epochs": epochs,
-                    "learning_rate": float(learning_rate),
-                    "batch_size": 1,
-                    "seed": seed,
-                    "loss": "binary-cross-entropy-plus-soft-dice",
-                    "train_manifest": train_manifest,
-                    "validation_manifest": val_manifest,
-                    "baseline_validation_mask_iou": baseline_val_iou,
-                    "history": history,
-                    "weight_delta_l2": weight_delta_l2,
-                }
-            )
+            completed_run = {
+                "epochs": epochs,
+                "learning_rate": float(learning_rate),
+                "batch_size": 1,
+                "seed": seed,
+                "loss": "binary-cross-entropy-plus-soft-dice",
+                "train_manifest": train_manifest,
+                "validation_manifest": val_manifest,
+                "baseline_validation_mask_iou": baseline_val_iou,
+                "history": history,
+                "weight_delta_l2": weight_delta_l2,
+            }
+            self.adaptation_config.update(completed_run)
+            self.adaptation_config["training_runs"] = [*prior_runs, completed_run]
         except Exception:
             with torch.no_grad():
                 for name, parameter in trainable.items():
@@ -766,18 +852,12 @@ class SAM2SegmentationPipeline:
         """Write a safe mask-hypernetwork adapter plus a closed integrity manifest."""
         from safetensors.torch import save_file
 
-        weight_delta = self.adaptation_config.get("weight_delta_l2")
-        history = self.adaptation_config.get("history")
-        if (
-            self.model is None
-            or not isinstance(weight_delta, int | float)
-            or isinstance(weight_delta, bool)
-            or not math.isfinite(float(weight_delta))
-            or weight_delta <= 0
-            or not isinstance(history, list)
-            or not history
-        ):
-            raise RuntimeError("artifact export requires completed fine-tuning with a positive weight delta")
+        if self.model is None:
+            raise RuntimeError("artifact export requires an underlying model")
+        try:
+            _validate_completed_adaptation_metadata(self.adaptation_config)
+        except ValueError as exc:
+            raise RuntimeError("artifact export requires completed fine-tuning metadata") from exc
         if len(producer_revision) != 40 or any(ch not in "0123456789abcdef" for ch in producer_revision):
             raise ValueError("producer_revision must be a lowercase 40-hex Git commit")
         root = Path(output_dir)
@@ -857,8 +937,7 @@ class SAM2SegmentationPipeline:
         if weights_path.stat().st_size != entry.get("bytes") or _sha256(weights_path) != entry.get("sha256"):
             raise ValueError("artifact weights failed size or SHA-256 verification")
         adaptation = manifest.get("adaptation")
-        if not isinstance(adaptation, dict):
-            raise ValueError("artifact adaptation metadata must be a mapping")
+        _validate_completed_adaptation_metadata(adaptation)
         state = load_file(str(weights_path), device=self.device)
         expected = {
             name for name in self.model.state_dict() if name.startswith(TRAINABLE_PREFIXES)
@@ -880,7 +959,17 @@ class SAM2SegmentationPipeline:
         # A fresh base model starts fully trainable. Reapply the declared adapter surface so a
         # verified artifact can be continued with ``finetune`` without exposing base parameters.
         self.freeze_for_adaptation()
-        self.adaptation_config = dict(adaptation)
+        loaded_adaptation = dict(adaptation)
+        prior_artifacts = loaded_adaptation.get("artifact_lineage", [])
+        loaded_adaptation["artifact_lineage"] = [
+            *json.loads(json.dumps(prior_artifacts)),
+            {
+                "manifest_sha256": _sha256(manifest_path),
+                "weights_sha256": entry["sha256"],
+                "producer": manifest.get("producer"),
+            },
+        ]
+        self.adaptation_config = loaded_adaptation
         return manifest
 
     @classmethod

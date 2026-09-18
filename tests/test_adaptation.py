@@ -319,6 +319,17 @@ def test_artifact_round_trip_and_integrity_rejection(tmp_path):
     after = rejected.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
     assert torch.equal(before, after)
 
+    manifest["adaptation"] = {}
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    rejected_empty = _pipeline()
+    before_empty = (
+        rejected_empty.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach().clone()
+    )
+    with pytest.raises(ValueError, match="adaptation metadata"):
+        rejected_empty.load_artifact(artifact)
+    after_empty = rejected_empty.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
+    assert torch.equal(before_empty, after_empty)
+
     manifest["adaptation"] = source.adaptation_config
     manifest["files"][0]["sha256"] = "0" * 64
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -362,6 +373,20 @@ def test_loaded_artifact_refreezes_base_and_supports_continued_finetuning(tmp_pa
 
     history = loaded.finetune(_records()[:2], _records()[2:], epochs=1, learning_rate=1e-2)
     assert history[0]["optimizer_steps"] == 2
+    assert len(loaded.adaptation_config["training_runs"]) == 2
+    assert loaded.adaptation_config["training_runs"][0]["weight_delta_l2"] == 1.0
+    assert loaded.adaptation_config["training_runs"][1]["weight_delta_l2"] > 0
+    assert loaded.adaptation_config["artifact_lineage"][0]["producer"]["revision"] == "c" * 40
+
+    continued = loaded.save_artifact(tmp_path / "continued", producer_revision="d" * 40)
+    continued_manifest = json.loads(
+        (continued / ARTIFACT_MANIFEST_NAME).read_text(encoding="utf-8")
+    )
+    assert len(continued_manifest["adaptation"]["training_runs"]) == 2
+    assert (
+        continued_manifest["adaptation"]["artifact_lineage"][0]["producer"]["revision"]
+        == "c" * 40
+    )
 
 
 def test_adapted_segment_defaults_to_single_mask_and_rejects_multimask():

@@ -7,11 +7,14 @@ cell, the inline manifest, or the inline pins diverge from the repository at HEA
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
@@ -105,3 +108,37 @@ def test_st1_primary_path_has_no_repository_dependency(notebook: dict) -> None:
     assert f"import {TEMPLATE['package']}" not in code
     assert f"from {TEMPLATE['package']}" not in code
     assert "github.com" not in code
+
+
+def test_byod_supports_an_attached_kaggle_zip_without_colab(notebook: dict, tmp_path) -> None:
+    code = "\n".join(_source(c) for c in _cells(notebook, "code"))
+    assert "BYOD_ZIP_PATH" in code
+    assert "/kaggle/input" in code
+    assert code.index("BYOD_ZIP_PATH") < code.index("from google.colab import files")
+
+    archive_path = tmp_path / "dataset.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        for index in range(8):
+            image = Image.new("RGB", (16, 16), (20 + index, 40, 80))
+            mask = Image.new("L", (16, 16), 0)
+            for y in range(4, 12):
+                for x in range(4, 12):
+                    mask.putpixel((x, y), 255)
+            for folder, item in (("images", image), ("masks", mask)):
+                buffer = io.BytesIO()
+                item.save(buffer, format="PNG")
+                archive.writestr(f"{folder}/sample-{index}.png", buffer.getvalue())
+
+    dataset_code = next(
+        _source(cell)
+        for cell in _cells(notebook, "code")
+        if "def load_byod_zip" in _source(cell)
+    )
+    dataset_code = dataset_code.replace("USE_BYOD = False", "USE_BYOD = True", 1).replace(
+        "BYOD_ZIP_PATH = ''", f"BYOD_ZIP_PATH = {str(archive_path)!r}", 1
+    )
+    namespace = {"MIN_IMAGE_SIDE": 16, "MAX_IMAGE_SIDE": 4096}
+    exec(compile(dataset_code, "<notebook-byod-cell>", "exec"), namespace)
+    assert namespace["dataset_kind"] == "BYOD"
+    assert len(namespace["train_records"]) == 6
+    assert len(namespace["val_records"]) == 2

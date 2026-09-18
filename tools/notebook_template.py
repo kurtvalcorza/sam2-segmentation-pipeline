@@ -15,8 +15,9 @@ TEMPLATE = {
         "numeric equivalence, and writes provenance without a clone, credential, upload, or configuration edit."
     ),
     "byod": (
-        "Set `USE_BYOD = True` to upload a bounded paired image/mask ZIP. The uploaded records pass through the same "
-        "validation, split, adaptation, evaluation, export, and reload path as the generated dataset."
+        "Set `USE_BYOD = True` and either provide `BYOD_ZIP_PATH` (including an attached Kaggle input path) or use "
+        "the Colab upload fallback. The records pass through the same validation, split, adaptation, evaluation, "
+        "export, and reload path as the generated dataset."
     ),
     "pipeline_class": "SAM2SegmentationPipeline",
     "weights_key": "sam2.1-hiera-small",
@@ -59,7 +60,7 @@ TEMPLATE = {
     "prerequisites": [
         "- **Runtime:** fresh Python 3.12 with an NVIDIA T4-class GPU or better. CUDA is required for the default fine-tuning path. The pinned 184 MB checkpoint is acquired automatically.",
         "- **Knowledge:** Python, binary masks, IoU, train/validation separation, and adapter-versus-base semantics.",
-        "- **Data:** the default path generates 24 shape scenes. Optional BYOD accepts a ZIP with `images/` and `masks/` files paired by stem; it is off by default and follows the same E2E path. Do not upload confidential or restricted data unless you are authorized to use it in the hosted runtime.",
+        "- **Data:** the default path generates 24 shape scenes. Optional BYOD accepts a ZIP with `images/` and `masks/` files paired by stem; set `BYOD_ZIP_PATH` to an attached file (for Kaggle, normally under `/kaggle/input/`) or use the Colab upload fallback. It is off by default and follows the same E2E path. Do not upload confidential or restricted data unless you are authorized to use it in the hosted runtime.",
     ],
     "cells": [
         {
@@ -67,15 +68,18 @@ TEMPLATE = {
                 "## 4. Generate or upload a paired segmentation dataset\n\n"
                 "The default 24 deterministic 256×256 scenes contain varied rounded rectangles and ellipses plus "
                 "distractors. Each record has an RGB image, boolean mask, foreground point, and bounding box. Records "
-                "0–17 train; 18–23 are held out. BYOD uses matching `images/<id>` and `masks/<id>.png` members and rejects "
-                "unsafe archive paths before decoding."
+                "0–17 train; 18–23 are held out. BYOD reads an explicit ZIP path, auto-discovers one attached Kaggle "
+                "ZIP, or falls back to the Colab upload dialog. It uses matching `images/<id>` and `masks/<id>.png` "
+                "members and rejects unsafe archive paths before decoding."
             ),
             "code": (
                 "import io\n"
                 "import zipfile\n\n"
+                "from pathlib import Path\n\n"
                 "import numpy as np\n"
                 "from PIL import Image, ImageDraw\n\n"
-                "USE_BYOD = False  # @param {{type:\"boolean\"}}\n\n"
+                "USE_BYOD = False  # @param {{type:\"boolean\"}}\n"
+                "BYOD_ZIP_PATH = ''  # @param {{type:\"string\"}}; Kaggle inputs are normally under /kaggle/input/\n\n"
                 "def record_from_pair(record_id, image, mask_image):\n"
                 "    image = image.convert('RGB')\n"
                 "    mask = np.asarray(mask_image.convert('L')) > 127\n"
@@ -136,10 +140,29 @@ TEMPLATE = {
                 "            image.load(); mask.load()\n"
                 "            records.append(record_from_pair(key, image, mask))\n"
                 "        return records\n\n"
-                "if USE_BYOD:\n"
-                "    from google.colab import files\n"
+                "def load_byod_zip():\n"
+                "    if BYOD_ZIP_PATH.strip():\n"
+                "        path = Path(BYOD_ZIP_PATH).expanduser()\n"
+                "        if not path.is_file():\n"
+                "            raise FileNotFoundError(f'BYOD ZIP not found: {{path}}')\n"
+                "        return path.read_bytes()\n"
+                "    kaggle_input = Path('/kaggle/input')\n"
+                "    if kaggle_input.is_dir():\n"
+                "        candidates = sorted(kaggle_input.rglob('*.zip'))\n"
+                "        if len(candidates) != 1:\n"
+                "            raise ValueError(f'expected exactly one attached Kaggle ZIP, found {{len(candidates)}}; set BYOD_ZIP_PATH explicitly')\n"
+                "        print({{'byod_zip': str(candidates[0])}})\n"
+                "        return candidates[0].read_bytes()\n"
+                "    try:\n"
+                "        from google.colab import files\n"
+                "    except ImportError as exc:\n"
+                "        raise RuntimeError('set BYOD_ZIP_PATH to a readable ZIP outside Colab') from exc\n"
                 "    uploaded = files.upload()\n"
-                "    dataset_records = records_from_zip(next(iter(uploaded.values())))\n"
+                "    if len(uploaded) != 1:\n"
+                "        raise ValueError(f'expected exactly one BYOD ZIP upload, found {{len(uploaded)}}')\n"
+                "    return next(iter(uploaded.values()))\n\n"
+                "if USE_BYOD:\n"
+                "    dataset_records = records_from_zip(load_byod_zip())\n"
                 "    dataset_kind = 'BYOD'\n"
                 "else:\n"
                 "    dataset_records = generated_records()\n"
