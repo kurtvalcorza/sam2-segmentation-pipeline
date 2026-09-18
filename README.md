@@ -35,6 +35,7 @@ mask = result["masks"][0]
 # report = pipe.finetune(train_records, val_records=heldout_records, epochs=2)
 # pipe.save_artifact("outputs/sam2-adapter", producer_revision="<git-sha>")
 # reloaded = SAM2SegmentationPipeline.from_artifact("outputs/sam2-adapter")
+# adapted = reloaded.segment(image, box=[75, 275, 1725, 850])  # trained single-mask head
 ```
 
 Install into a Python 3.12 environment that already holds the pinned dependencies with `pip install -e . --no-deps`; run `pytest -q -o addopts= tests` for the offline test suite (no weights needed). On a fresh clone the manifest is committed but the weights are not: `SAM2SegmentationPipeline.from_pretrained(allow_download=True)` fetches exactly the missing manifest-listed files at the pinned revision, then verifies them.
@@ -63,7 +64,7 @@ weights/sam2.1-hiera-small/
 
 ## Release status
 
-**Candidate.** Review remediation changes the executable carrier, so the earlier exact-blob qualification does not apply to the current revision. A fresh 11-cell Kaggle T4 `Run all` is required and will be recorded in `docs/release-verification.md` before reviewer/integrator promotion.
+**Candidate.** The corrected carrier passed all 11 cells on clean-cache Kaggle T4 kernel v6. Exact carrier, embedded-source, notebook-blob, runtime, and output identities are recorded in `docs/release-verification.md`; reviewer/integrator promotion remains separate.
 
 ## Documentation
 
