@@ -26,6 +26,7 @@ ARTIFACT_WEIGHTS_NAME = "adapter.safetensors"
 TRAINABLE_PREFIXES = ("mask_decoder.output_hypernetworks_mlps.0.",)
 ADAPTATION_METHOD = "frozen-backbone-mask-hypernetwork-gradient-adaptation"
 MAX_ADAPTATION_RECORDS = 128
+MAX_ADAPTATION_PIXELS = 32 * 1024 * 1024
 
 _ADAPTATION_RUN_FIELDS = (
     "epochs",
@@ -46,6 +47,19 @@ _DATASET_MANIFEST_FIELDS = {
     "dataset_sha256",
     "verdict",
 }
+_ADAPTATION_BASE_FIELDS = {
+    "method",
+    "trainable_prefixes",
+    "trainable_parameters",
+    "frozen_parameters",
+}
+_ADAPTATION_METADATA_FIELDS = {
+    *_ADAPTATION_BASE_FIELDS,
+    *_ADAPTATION_RUN_FIELDS,
+    "training_runs",
+    "artifact_lineage",
+}
+_ARTIFACT_LINEAGE_FIELDS = {"manifest_sha256", "weights_sha256", "producer"}
 
 # Input ceilings. The processor resizes every image to 1024x1024 (preprocessor_config.json), so model cost is
 # fixed; the caller's resolution only sets the size of the up-sampled output masks. Prompts are one object per
@@ -110,6 +124,8 @@ def _validate_dataset_manifest(manifest: Any, *, label: str) -> None:
 def _validate_adaptation_run(run: Any, *, label: str) -> None:
     if not isinstance(run, Mapping):
         raise ValueError(f"{label} must be a mapping")
+    if set(run) != set(_ADAPTATION_RUN_FIELDS):
+        raise ValueError(f"{label} does not match the adaptation run schema")
     missing = [key for key in _ADAPTATION_RUN_FIELDS if key not in run]
     if missing:
         raise ValueError(f"{label} is missing required fields: {missing}")
@@ -127,22 +143,59 @@ def _validate_adaptation_run(run: Any, *, label: str) -> None:
     if run["loss"] != "binary-cross-entropy-plus-soft-dice":
         raise ValueError(f"{label} has an unsupported loss")
     _validate_dataset_manifest(run["train_manifest"], label=f"{label} train manifest")
-    if run["validation_manifest"] is not None:
+    validation_manifest = run["validation_manifest"]
+    if validation_manifest is not None:
         _validate_dataset_manifest(
-            run["validation_manifest"], label=f"{label} validation manifest"
+            validation_manifest, label=f"{label} validation manifest"
         )
     baseline = run["baseline_validation_mask_iou"]
+    if validation_manifest is None and baseline is not None:
+        raise ValueError(f"{label} has invalid validation baseline")
     if baseline is not None and (
         not isinstance(baseline, int | float)
         or isinstance(baseline, bool)
         or not math.isfinite(float(baseline))
+        or not 0 <= float(baseline) <= 1
     ):
         raise ValueError(f"{label} has invalid validation baseline")
     history = run["history"]
-    if not isinstance(history, list) or not history or not all(
-        isinstance(item, Mapping) for item in history
-    ):
+    if not isinstance(history, list) or not history:
         raise ValueError(f"{label} requires non-empty training history")
+    if len(history) != epochs:
+        raise ValueError(f"{label} history length does not match epochs")
+    expected_history_fields = {"epoch", "train_loss", "optimizer_steps"}
+    if validation_manifest is not None:
+        expected_history_fields.add("val_mask_iou")
+    expected_steps = math.ceil(run["train_manifest"]["records"] / batch_size)
+    for expected_epoch, item in enumerate(history, start=1):
+        if not isinstance(item, Mapping) or set(item) != expected_history_fields:
+            raise ValueError(f"{label} history entry schema is invalid")
+        if item["epoch"] != expected_epoch or isinstance(item["epoch"], bool):
+            raise ValueError(f"{label} history has an invalid epoch sequence")
+        train_loss = item["train_loss"]
+        if (
+            not isinstance(train_loss, int | float)
+            or isinstance(train_loss, bool)
+            or not math.isfinite(float(train_loss))
+            or train_loss < 0
+        ):
+            raise ValueError(f"{label} history has an invalid train loss")
+        optimizer_steps = item["optimizer_steps"]
+        if (
+            not isinstance(optimizer_steps, int)
+            or isinstance(optimizer_steps, bool)
+            or optimizer_steps != expected_steps
+        ):
+            raise ValueError(f"{label} history has an invalid optimizer step count")
+        if validation_manifest is not None:
+            val_mask_iou = item["val_mask_iou"]
+            if (
+                not isinstance(val_mask_iou, int | float)
+                or isinstance(val_mask_iou, bool)
+                or not math.isfinite(float(val_mask_iou))
+                or not 0 <= float(val_mask_iou) <= 1
+            ):
+                raise ValueError(f"{label} history has an invalid validation mask IoU")
     if not _is_positive_finite_number(run["weight_delta_l2"]):
         raise ValueError(f"{label} requires a positive finite weight delta")
 
@@ -151,6 +204,11 @@ def _validate_completed_adaptation_metadata(adaptation: Any) -> None:
     """Reject metadata that cannot identify a completed adapter before weights are applied."""
     if not isinstance(adaptation, Mapping):
         raise ValueError("artifact adaptation metadata must be a mapping")
+    unknown_fields = set(adaptation) - _ADAPTATION_METADATA_FIELDS
+    if unknown_fields:
+        raise ValueError(
+            f"artifact adaptation metadata contains unknown fields: {sorted(unknown_fields)}"
+        )
     if adaptation.get("method") != ADAPTATION_METHOD:
         raise ValueError("artifact adaptation metadata has an unsupported or missing method")
     if adaptation.get("trainable_prefixes") != list(TRAINABLE_PREFIXES):
@@ -161,7 +219,10 @@ def _validate_completed_adaptation_metadata(adaptation: Any) -> None:
         raise ValueError("artifact adaptation metadata has invalid trainable parameter count")
     if not isinstance(frozen, int) or isinstance(frozen, bool) or frozen < 0:
         raise ValueError("artifact adaptation metadata has invalid frozen parameter count")
-    _validate_adaptation_run(adaptation, label="artifact adaptation metadata current run")
+    _validate_adaptation_run(
+        _adaptation_run_snapshot(adaptation),
+        label="artifact adaptation metadata current run",
+    )
     if "training_runs" in adaptation:
         training_runs = adaptation["training_runs"]
         if not isinstance(training_runs, list) or not training_runs:
@@ -172,10 +233,37 @@ def _validate_completed_adaptation_metadata(adaptation: Any) -> None:
             raise ValueError("artifact adaptation metadata latest training run does not match current run")
     if "artifact_lineage" in adaptation:
         artifact_lineage = adaptation["artifact_lineage"]
-        if not isinstance(artifact_lineage, list) or not all(
-            isinstance(item, Mapping) for item in artifact_lineage
-        ):
+        if not isinstance(artifact_lineage, list):
             raise ValueError("artifact adaptation metadata artifact_lineage must be a list of mappings")
+        for index, item in enumerate(artifact_lineage):
+            if not isinstance(item, Mapping) or set(item) != _ARTIFACT_LINEAGE_FIELDS:
+                raise ValueError(
+                    f"artifact adaptation metadata artifact_lineage[{index}] has invalid fields"
+                )
+            for digest_field in ("manifest_sha256", "weights_sha256"):
+                digest = item[digest_field]
+                if (
+                    not isinstance(digest, str)
+                    or len(digest) != 64
+                    or any(character not in "0123456789abcdef" for character in digest)
+                ):
+                    raise ValueError(
+                        f"artifact adaptation metadata artifact_lineage[{index}] has an invalid digest"
+                    )
+            producer = item["producer"]
+            if (
+                not isinstance(producer, Mapping)
+                or set(producer) != {"pipelineId", "revision"}
+                or producer["pipelineId"] != "sam2-segmentation-pipeline"
+                or not isinstance(producer["revision"], str)
+                or len(producer["revision"]) != 40
+                or any(
+                    character not in "0123456789abcdef" for character in producer["revision"]
+                )
+            ):
+                raise ValueError(
+                    f"artifact adaptation metadata artifact_lineage[{index}] has an invalid producer"
+                )
 
 
 def _adaptation_run_snapshot(adaptation: Mapping[str, Any]) -> dict[str, Any]:
@@ -686,6 +774,14 @@ class SAM2SegmentationPipeline:
             raise ValueError("seed must be an int")
         train_manifest = validate_segmentation_dataset(train_records)
         val_manifest = validate_segmentation_dataset(val_records) if val_records else None
+        adaptation_pixels = sum(
+            record["image"].width * record["image"].height for record in train_records
+        ) + sum(record["image"].width * record["image"].height for record in (val_records or ()))
+        if adaptation_pixels > MAX_ADAPTATION_PIXELS:
+            raise ValueError(
+                f"adaptation aggregate pixel count {adaptation_pixels} exceeds "
+                f"MAX_ADAPTATION_PIXELS {MAX_ADAPTATION_PIXELS}"
+            )
         if val_records:
             train_ids = {str(record["id"]) for record in train_records}
             val_ids = {str(record["id"]) for record in val_records}
@@ -707,17 +803,36 @@ class SAM2SegmentationPipeline:
         entry_requires_grad = {
             name: parameter.requires_grad for name, parameter in self.model.named_parameters()
         }
+        entry_parameter_devices = {
+            name: parameter.device for name, parameter in self.model.named_parameters()
+        }
+        entry_parameter_grads = {
+            name: None if parameter.grad is None else parameter.grad.detach().clone()
+            for name, parameter in self.model.named_parameters()
+        }
+        entry_buffer_devices = {
+            name: buffer.device for name, buffer in self.model.named_buffers()
+        }
         entry_training = self.model.training
 
         def restore_entry_state() -> None:
             self.adaptation_config = copy.deepcopy(entry_config)
-            for name, parameter in self.model.named_parameters():
-                parameter.requires_grad = entry_requires_grad[name]
+            with torch.no_grad():
+                for name, parameter in self.model.named_parameters():
+                    parameter.data = parameter.data.to(entry_parameter_devices[name])
+                    entry_grad = entry_parameter_grads[name]
+                    parameter.grad = (
+                        None
+                        if entry_grad is None
+                        else entry_grad.to(entry_parameter_devices[name]).clone()
+                    )
+                    parameter.requires_grad = entry_requires_grad[name]
+                for name, buffer in self.model.named_buffers():
+                    buffer.data = buffer.data.to(entry_buffer_devices[name])
             self.model.train(entry_training)
 
-        torch.manual_seed(seed)
         device = torch.device(self.device)
-        self.model.to(device).eval()
+
         def prepare(
             record: Mapping[str, Any],
         ) -> tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
@@ -770,6 +885,8 @@ class SAM2SegmentationPipeline:
             return float(np.mean(values)) if values else 0.0
 
         try:
+            torch.manual_seed(seed)
+            self.model.to(device).eval()
             cached_train = [prepare(record) for record in train_records]
             cached_val = [prepare(record) for record in val_records] if val_records else []
             baseline_val_iou = score(cached_val) if cached_val else None
@@ -967,17 +1084,19 @@ class SAM2SegmentationPipeline:
             raise RuntimeError("artifact export requires completed fine-tuning metadata") from exc
         if len(producer_revision) != 40 or any(ch not in "0123456789abcdef" for ch in producer_revision):
             raise ValueError("producer_revision must be a lowercase 40-hex Git commit")
+        state = {}
+        for name, tensor in self.model.state_dict().items():
+            if not name.startswith(TRAINABLE_PREFIXES):
+                continue
+            if not bool(tensor.isfinite().all()):
+                raise RuntimeError(f"cannot export non-finite adapter tensor: {name}")
+            state[name] = tensor.detach().cpu().contiguous()
+        if not state:
+            raise RuntimeError("no adapter tensors selected for export")
         root = Path(output_dir)
         root.mkdir(parents=True, exist_ok=True)
         if any(root.iterdir()):
             raise FileExistsError(f"artifact directory is not empty: {root}")
-        state = {
-            name: tensor.detach().cpu().contiguous()
-            for name, tensor in self.model.state_dict().items()
-            if name.startswith(TRAINABLE_PREFIXES)
-        }
-        if not state:
-            raise RuntimeError("no adapter tensors selected for export")
         weights_path = root / ARTIFACT_WEIGHTS_NAME
         save_file(state, str(weights_path))
         manifest = {
@@ -996,7 +1115,7 @@ class SAM2SegmentationPipeline:
                     "sha256": _sha256(weights_path),
                 }
             ],
-            "adaptation": dict(self.adaptation_config),
+            "adaptation": copy.deepcopy(self.adaptation_config),
             "trainablePrefixes": list(TRAINABLE_PREFIXES),
             "retainedData": {"containsTrainingRecords": False, "containsSupportRecords": False},
             "serialization": "safetensors",
@@ -1032,6 +1151,16 @@ class SAM2SegmentationPipeline:
             raise ValueError("artifact base model identity is incompatible")
         if manifest.get("trainablePrefixes") != list(TRAINABLE_PREFIXES):
             raise ValueError("artifact trainable prefixes do not match this pipeline")
+        producer = manifest.get("producer")
+        if (
+            not isinstance(producer, Mapping)
+            or set(producer) != {"pipelineId", "revision"}
+            or producer["pipelineId"] != "sam2-segmentation-pipeline"
+            or not isinstance(producer["revision"], str)
+            or len(producer["revision"]) != 40
+            or any(character not in "0123456789abcdef" for character in producer["revision"])
+        ):
+            raise ValueError("artifact producer identity is invalid")
         files = manifest.get("files")
         if not isinstance(files, list) or len(files) != 1:
             raise ValueError("artifact manifest must inventory exactly one weights file")
@@ -1066,14 +1195,14 @@ class SAM2SegmentationPipeline:
         # A fresh base model starts fully trainable. Reapply the declared adapter surface so a
         # verified artifact can be continued with ``finetune`` without exposing base parameters.
         self.freeze_for_adaptation()
-        loaded_adaptation = dict(adaptation)
+        loaded_adaptation = copy.deepcopy(adaptation)
         prior_artifacts = loaded_adaptation.get("artifact_lineage", [])
         loaded_adaptation["artifact_lineage"] = [
             *json.loads(json.dumps(prior_artifacts)),
             {
                 "manifest_sha256": _sha256(manifest_path),
                 "weights_sha256": entry["sha256"],
-                "producer": manifest.get("producer"),
+                "producer": copy.deepcopy(producer),
             },
         ]
         self.adaptation_config = loaded_adaptation

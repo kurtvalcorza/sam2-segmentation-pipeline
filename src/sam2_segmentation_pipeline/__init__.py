@@ -1,6 +1,7 @@
 from .pipeline import (
     DEFAULT_WEIGHTS_DIR,
     INPUT_SCHEMA,
+    MAX_ADAPTATION_PIXELS,
     MAX_IMAGE_SIDE,
     MAX_PROMPTS,
     MIN_IMAGE_SIDE,
@@ -21,6 +22,7 @@ from .pipeline import (
 __all__ = [
     "DEFAULT_WEIGHTS_DIR",
     "INPUT_SCHEMA",
+    "MAX_ADAPTATION_PIXELS",
     "MAX_IMAGE_SIDE",
     "MAX_PROMPTS",
     "MIN_IMAGE_SIDE",

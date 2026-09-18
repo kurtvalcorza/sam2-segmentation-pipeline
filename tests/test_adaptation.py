@@ -10,6 +10,7 @@ import torch
 from PIL import Image
 from safetensors.torch import load_file, save_file
 
+import sam2_segmentation_pipeline.pipeline as pipeline_module
 from sam2_segmentation_pipeline.pipeline import (
     ARTIFACT_MANIFEST_NAME,
     ARTIFACT_WEIGHTS_NAME,
@@ -107,7 +108,14 @@ def _mark_completed(pipeline: SAM2SegmentationPipeline, *, weight_delta_l2: floa
             "train_manifest": validate_segmentation_dataset(records[:2]),
             "validation_manifest": validate_segmentation_dataset(records[2:]),
             "baseline_validation_mask_iou": 0.25,
-            "history": [{"epoch": 1, "train_loss": 0.5, "optimizer_steps": 2}],
+            "history": [
+                {
+                    "epoch": 1,
+                    "train_loss": 0.5,
+                    "optimizer_steps": 2,
+                    "val_mask_iou": 0.3,
+                }
+            ],
             "weight_delta_l2": weight_delta_l2,
         }
     )
@@ -295,6 +303,35 @@ def test_interrupted_initial_preprocessing_restores_entry_state(monkeypatch):
     assert {
         name: parameter.requires_grad for name, parameter in pipeline.model.named_parameters()
     } == requires_grad
+
+
+def test_interrupted_model_setup_restores_mode_and_entry_state(monkeypatch):
+    pipeline = _pipeline()
+    pipeline.model.train()
+    requires_grad = {
+        name: parameter.requires_grad for name, parameter in pipeline.model.named_parameters()
+    }
+    original_eval = pipeline.model.eval
+
+    def interrupted_eval():
+        original_eval()
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pipeline.model, "eval", interrupted_eval)
+    with pytest.raises(KeyboardInterrupt):
+        pipeline.finetune(_records()[:2], epochs=1, learning_rate=1e-2)
+    assert pipeline.model.training is True
+    assert pipeline.adaptation_config == {}
+    assert {
+        name: parameter.requires_grad for name, parameter in pipeline.model.named_parameters()
+    } == requires_grad
+
+
+def test_finetune_rejects_aggregate_pixels_across_train_and_validation(monkeypatch):
+    records = _records()
+    monkeypatch.setattr(pipeline_module, "MAX_ADAPTATION_PIXELS", 3 * 16 * 16)
+    with pytest.raises(ValueError, match="aggregate pixel"):
+        _pipeline().finetune(records[:2], records[2:], epochs=1, learning_rate=1e-2)
 
 
 def test_finetune_rejects_train_validation_overlap_by_id_or_content():
@@ -533,6 +570,88 @@ def test_loaded_artifact_refreezes_base_and_supports_continued_finetuning(tmp_pa
         continued_manifest["adaptation"]["artifact_lineage"][0]["producer"]["revision"]
         == "c" * 40
     )
+
+
+def test_loaded_manifest_metadata_is_detached_from_pipeline_state(tmp_path):
+    source = _pipeline()
+    source.freeze_for_adaptation()
+    _mark_completed(source)
+    artifact = source.save_artifact(tmp_path / "artifact", producer_revision="e" * 40)
+
+    loaded = _pipeline()
+    returned_manifest = loaded.load_artifact(artifact)
+    returned_manifest["adaptation"]["history"][0]["train_loss"] = 999.0
+    returned_manifest["adaptation"]["train_manifest"]["records"] = 999
+
+    assert loaded.adaptation_config["history"][0]["train_loss"] == 0.5
+    assert loaded.adaptation_config["train_manifest"]["records"] == 2
+
+
+@pytest.mark.parametrize(
+    ("history", "expected_error"),
+    [
+        ([{}], "history entry schema"),
+        (
+            [
+                {
+                    "epoch": 1,
+                    "train_loss": float("nan"),
+                    "optimizer_steps": 2,
+                    "val_mask_iou": 0.3,
+                }
+            ],
+            "train loss",
+        ),
+        (
+            [
+                {
+                    "epoch": 1,
+                    "train_loss": 0.5,
+                    "optimizer_steps": 2,
+                    "val_mask_iou": 0.3,
+                },
+                {
+                    "epoch": 1,
+                    "train_loss": 0.4,
+                    "optimizer_steps": 2,
+                    "val_mask_iou": 0.4,
+                },
+            ],
+            "history length",
+        ),
+    ],
+)
+def test_artifact_export_rejects_malformed_training_history(
+    tmp_path, history, expected_error
+):
+    pipeline = _pipeline()
+    pipeline.freeze_for_adaptation()
+    _mark_completed(pipeline)
+    pipeline.adaptation_config["history"] = history
+    with pytest.raises(RuntimeError, match="completed fine-tuning") as exc_info:
+        pipeline.save_artifact(tmp_path / "artifact", producer_revision="f" * 40)
+    assert exc_info.value.__cause__ is not None
+    assert expected_error in str(exc_info.value.__cause__)
+
+
+def test_artifact_export_rejects_unknown_adaptation_metadata(tmp_path):
+    pipeline = _pipeline()
+    pipeline.freeze_for_adaptation()
+    _mark_completed(pipeline)
+    pipeline.adaptation_config["training_records"] = [{"secret": "must not be retained"}]
+    with pytest.raises(RuntimeError, match="completed fine-tuning") as exc_info:
+        pipeline.save_artifact(tmp_path / "artifact", producer_revision="f" * 40)
+    assert "unknown fields" in str(exc_info.value.__cause__)
+
+
+def test_artifact_export_rejects_non_finite_adapter_tensors(tmp_path):
+    pipeline = _pipeline()
+    pipeline.freeze_for_adaptation()
+    _mark_completed(pipeline)
+    with torch.no_grad():
+        pipeline.model.mask_decoder.output_hypernetworks_mlps[0].weight.fill_(float("nan"))
+    with pytest.raises(RuntimeError, match="non-finite adapter tensor"):
+        pipeline.save_artifact(tmp_path / "artifact", producer_revision="f" * 40)
 
 
 def test_adapted_segment_defaults_to_single_mask_and_rejects_multimask():

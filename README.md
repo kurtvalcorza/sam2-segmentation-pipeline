@@ -54,7 +54,7 @@ weights/sam2.1-hiera-small/
 
 ## Input ceilings
 
-`MIN_IMAGE_SIDE = 16`, `MAX_IMAGE_SIDE = 4096`, `MAX_PROMPTS = 16` points; one object per call; masks are binarised at logit `MASK_THRESHOLD = 0.0`. See `MODEL_CARD.md` for the measured CPU timings and the candidate-selection rule.
+`MIN_IMAGE_SIDE = 16`, `MAX_IMAGE_SIDE = 4096`, `MAX_PROMPTS = 16` points; one object per call; fine-tuning accepts at most `MAX_ADAPTATION_PIXELS = 33,554,432` pixels across the combined train and validation inputs; masks are binarised at logit `MASK_THRESHOLD = 0.0`. See `MODEL_CARD.md` for the measured CPU timings and the candidate-selection rule.
 
 ## Tutorials
 
