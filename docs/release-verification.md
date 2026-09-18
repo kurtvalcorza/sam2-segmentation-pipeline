@@ -1,6 +1,6 @@
 # Release verification
 
-`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Review remediation changed the executable source after the v4 run, so a fresh exact-blob clean Kaggle T4 run is required. The v4 executor pass remains recorded below as historical workflow evidence but does not satisfy the gate for the corrected revision.
+`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Exact carrier commit `dc70d19e20fd0326d807159846696a273f678660`, embedded source revision `3b292b27dc7d292b36c5512a60250cfb1ea58daa`, and notebook blob `f9bd4220248d89f00ca63701e3f79ac0378f4f87` passed top-to-bottom in a clean supported Kaggle T4 runtime. This satisfies the corrected execution-evidence gate but does not itself perform reviewer/integrator promotion.
 
 ## Automatic coverage
 
@@ -32,7 +32,7 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 | Date (UTC) | Commit / notebook blob | Executor | Path | Outcome |
 |---|---|---|---|---|
-| Awaiting rerun | Corrected review-remediation commit/blob to be recorded | Kaggle T4 | Default generated dataset | Required before promotion |
+| 2026-09-18 | `dc70d19e20fd0326d807159846696a273f678660` / `f9bd4220248d89f00ca63701e3f79ac0378f4f87` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v5) | Default generated dataset | **PASS** — 11/11 cells after one expected install restart; 299.4 s; clean cache; 16 staged files / 184 MB; 36 optimizer steps; held-out IoU 0.998254 → 0.998457 versus 0.856681 prompt-box baseline; unseen IoU 1.0; reload mask exact and score within tolerance |
 
 ### Local E2E pre-flight (not promotion evidence)
 
@@ -50,4 +50,4 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 ## Current status
 
-The corrected E2E implementation and generated carrier remain **Candidate**, and the clean-runtime gate is open. Requalification must verify the exact corrected notebook blob, a clean Hugging Face cache, the declared pins, the digest-bound base snapshot, all 11 code cells, bounded GPU memory behavior, nonzero finite gradient movement, held-out evaluation, and fresh reload equivalence. Synthetic held-out scores remain workflow evidence only and cannot establish quality improvement.
+The corrected E2E implementation and generated carrier remain **Candidate**, with the clean-runtime gate satisfied. The serial executor verified the Git blob, began with a clean Hugging Face cache, installed the declared pins, restarted once as designed after dependency replacement, downloaded and digest-verified the pinned base snapshot, completed all 11 code cells, and preserved the v5 output hashes under `verification/2026-09-18-kaggle-t4/`. The synthetic held-out scores are workflow evidence only and cannot establish quality improvement; promotion remains a separate reviewer/integrator decision.

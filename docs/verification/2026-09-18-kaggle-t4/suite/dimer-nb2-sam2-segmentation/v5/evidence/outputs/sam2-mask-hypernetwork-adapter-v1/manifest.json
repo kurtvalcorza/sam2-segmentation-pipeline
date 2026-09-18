@@ -1,0 +1,74 @@
+{
+  "artifactSpec": "1.0",
+  "format": "org.valcorza.sam2.mask-decoder-adapter",
+  "formatVersion": "1.0",
+  "artifactClass": "ADAPTER",
+  "artifactKind": "sam2-mask-hypernetwork-adapter",
+  "producer": {
+    "pipelineId": "sam2-segmentation-pipeline",
+    "revision": "3b292b27dc7d292b36c5512a60250cfb1ea58daa"
+  },
+  "createdAtUtc": "2026-09-18T01:19:37.880461+00:00",
+  "baseModel": {
+    "id": "facebook/sam2.1-hiera-small",
+    "revision": "ee5bba1d82bb8749febdf90f45e84b687142ba03"
+  },
+  "files": [
+    {
+      "path": "adapter.safetensors",
+      "bytes": 559960,
+      "sha256": "5d5d9d628473c5d9e014daceea73964557bd55f321a1d34b654d9c94b74f9810"
+    }
+  ],
+  "adaptation": {
+    "method": "frozen-backbone-mask-hypernetwork-gradient-adaptation",
+    "trainable_prefixes": [
+      "mask_decoder.output_hypernetworks_mlps.0."
+    ],
+    "trainable_parameters": 139808,
+    "frozen_parameters": 38398769,
+    "epochs": 2,
+    "learning_rate": 2e-05,
+    "batch_size": 1,
+    "seed": 42,
+    "loss": "binary-cross-entropy-plus-soft-dice",
+    "train_manifest": {
+      "records": 18,
+      "unique_ids": 18,
+      "positive_pixels": 132413,
+      "dataset_sha256": "f6b73d6f5e1d82cbd80a646df19f7c510e42bdc9c67163a090f332578eb41099",
+      "verdict": "accepted"
+    },
+    "validation_manifest": {
+      "records": 6,
+      "unique_ids": 6,
+      "positive_pixels": 42961,
+      "dataset_sha256": "a98b8bfddb3c2f43a8afedcf34ac7a3a2aa4a6aba198c0cb86ddf075a2c205fc",
+      "verdict": "accepted"
+    },
+    "baseline_validation_mask_iou": 0.9982536177479225,
+    "history": [
+      {
+        "epoch": 1,
+        "train_loss": 0.007102,
+        "optimizer_steps": 18,
+        "val_mask_iou": 0.998383
+      },
+      {
+        "epoch": 2,
+        "train_loss": 0.005357,
+        "optimizer_steps": 18,
+        "val_mask_iou": 0.998457
+      }
+    ],
+    "weight_delta_l2": 0.10881877112418228
+  },
+  "trainablePrefixes": [
+    "mask_decoder.output_hypernetworks_mlps.0."
+  ],
+  "retainedData": {
+    "containsTrainingRecords": false,
+    "containsSupportRecords": false
+  },
+  "serialization": "safetensors"
+}
