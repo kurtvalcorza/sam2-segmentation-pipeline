@@ -394,25 +394,11 @@ def validate_segmentation_dataset(records: Sequence[Mapping[str, Any]]) -> dict[
 
 
 def _segmentation_record_content_sha256(record: Mapping[str, Any]) -> str:
-    """Fingerprint one validated image/mask/prompt record without its caller-supplied ID."""
+    """Fingerprint one validated image/mask sample without its ID or mutable prompts."""
     image = validate_image(record["image"])
-    clean_points, clean_labels, clean_box = validate_prompts(
-        image.width,
-        image.height,
-        record.get("points"),
-        record.get("point_labels"),
-        record.get("box"),
-    )
     digest = hashlib.sha256()
     digest.update(np.asarray(image, dtype=np.uint8).tobytes())
     digest.update(np.asarray(record["mask"], dtype=np.bool_).tobytes())
-    digest.update(
-        json.dumps(
-            {"points": clean_points, "point_labels": clean_labels, "box": clean_box},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    )
     return digest.hexdigest()
 
 
@@ -537,7 +523,7 @@ class SAM2SegmentationPipeline:
                 _segmentation_record_content_sha256(record) for record in val_records
             }
             if train_content & val_content:
-                raise ValueError("train and validation records overlap by image/mask/prompt content")
+                raise ValueError("train and validation records overlap by image/mask content")
         if not self.adaptation_config:
             self.freeze_for_adaptation()
         if any(
@@ -561,7 +547,7 @@ class SAM2SegmentationPipeline:
 
         def prepare(
             record: Mapping[str, Any],
-        ) -> tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor]:
+        ) -> tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor, torch.Tensor]:
             prompt_kwargs: dict[str, Any] = {}
             if record.get("points") is not None:
                 prompt_kwargs["input_points"] = [[record["points"]]]
@@ -582,30 +568,35 @@ class SAM2SegmentationPipeline:
                 if key in batch
             }
             target = torch.from_numpy(np.asarray(record["mask"], dtype=np.float32))
-            return embeddings, prompts, target
+            original_size = torch.tensor([[record["image"].height, record["image"].width]])
+            return embeddings, prompts, target, original_size
 
         cached_train = [prepare(record) for record in train_records]
         cached_val = [prepare(record) for record in val_records] if val_records else []
 
         def score(
-            cached: Sequence[tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor]],
+            cached: Sequence[
+                tuple[list[torch.Tensor], dict[str, torch.Tensor], torch.Tensor, torch.Tensor]
+            ],
         ) -> float:
             values: list[float] = []
             self.model.eval()
             with torch.inference_mode():
-                for embeddings, prompts, target in cached:
+                for embeddings, prompts, target, original_size in cached:
                     device_embeddings = [item.to(device) for item in embeddings]
                     device_prompts = {key: value.to(device) for key, value in prompts.items()}
                     device_target = target.to(device)
-                    logits = self.model(
+                    outputs = self.model(
                         image_embeddings=device_embeddings,
                         multimask_output=False,
                         **device_prompts,
-                    ).pred_masks[0, 0, 0]
-                    target_low = F.interpolate(
-                        device_target[None, None], size=logits.shape, mode="nearest"
-                    )[0, 0].bool()
-                    values.append(mask_iou((logits > MASK_THRESHOLD).cpu().numpy(), target_low.cpu().numpy()))
+                    )
+                    public_mask = self.processor.post_process_masks(
+                        outputs.pred_masks.cpu(),
+                        original_size,
+                        mask_threshold=MASK_THRESHOLD,
+                    )[0][0, 0]
+                    values.append(mask_iou(public_mask.numpy(), device_target.cpu().numpy().astype(bool)))
             return float(np.mean(values)) if values else 0.0
 
         history: list[dict[str, Any]] = []
@@ -615,7 +606,7 @@ class SAM2SegmentationPipeline:
             random.Random(seed + epoch * 17).shuffle(order)
             total_loss = 0.0
             for index in order:
-                embeddings, prompts, target = cached_train[index]
+                embeddings, prompts, target, _original_size = cached_train[index]
                 device_embeddings = [item.to(device) for item in embeddings]
                 device_prompts = {key: value.to(device) for key, value in prompts.items()}
                 device_target = target.to(device)
@@ -674,6 +665,7 @@ class SAM2SegmentationPipeline:
         validate_segmentation_dataset(records)
         model_ious: list[float] = []
         box_ious: list[float] = []
+        box_model_ious: list[float] = []
         for record in records:
             result = self.segment(
                 record["image"],
@@ -683,24 +675,28 @@ class SAM2SegmentationPipeline:
                 multimask=False,
             )
             target = np.asarray(record["mask"], dtype=np.bool_)
-            model_ious.append(mask_iou(result["masks"][0], target))
+            model_iou = mask_iou(result["masks"][0], target)
+            model_ious.append(model_iou)
             box = record.get("box")
             if box is not None:
                 baseline = np.zeros_like(target)
                 x0, y0, x1, y1 = (int(round(value)) for value in box)
                 baseline[y0:y1, x0:x1] = True
                 box_ious.append(mask_iou(baseline, target))
+                box_model_ious.append(model_iou)
         box_baseline_mean_iou = float(np.mean(box_ious)) if box_ious else None
+        box_prompt_model_mean_iou = float(np.mean(box_model_ious)) if box_model_ious else None
         return {
             "records": len(records),
             "mean_mask_iou": float(np.mean(model_ious)),
             "per_record_mask_iou": model_ious,
             "box_baseline_records": len(box_ious),
+            "box_prompt_model_mean_iou": box_prompt_model_mean_iou,
             "box_baseline_mean_iou": box_baseline_mean_iou,
             "delta_over_box_baseline": (
                 None
                 if box_baseline_mean_iou is None
-                else float(np.mean(model_ious) - box_baseline_mean_iou)
+                else float(box_prompt_model_mean_iou - box_baseline_mean_iou)
             ),
         }
 

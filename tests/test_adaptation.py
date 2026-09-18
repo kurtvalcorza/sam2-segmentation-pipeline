@@ -33,6 +33,13 @@ class _Processor:
             batch["input_boxes"] = torch.tensor(kwargs["input_boxes"], dtype=torch.float32)
         return batch
 
+    def post_process_masks(self, pred_masks, original_sizes, *, mask_threshold):
+        height, width = (int(value) for value in original_sizes[0])
+        resized = torch.nn.functional.interpolate(
+            pred_masks[:, 0], size=(height, width), mode="bilinear", align_corners=False
+        )
+        return [(resized > mask_threshold)]
+
 
 class _FakeSAM2(torch.nn.Module):
     def __init__(self):
@@ -129,16 +136,45 @@ def test_finetune_rejects_train_validation_overlap_by_id_or_content():
         _pipeline().finetune(records[:2], records[1:3], epochs=1)
 
     renamed = dict(records[0], id="renamed-shape")
-    with pytest.raises(ValueError, match="overlap by image/mask/prompt content"):
+    with pytest.raises(ValueError, match="overlap by image/mask content"):
         _pipeline().finetune(records[:2], [renamed, records[2]], epochs=1)
+
+    reprompted = dict(
+        records[0],
+        id="reprompted-shape",
+        points=[[6.0, 6.0]],
+        box=[3.0, 2.0, 13.0, 14.0],
+    )
+    with pytest.raises(ValueError, match="overlap by image/mask content"):
+        _pipeline().finetune(records[:2], [reprompted, records[2]], epochs=1)
 
 
 def test_point_only_evaluation_omits_box_baseline():
     records = [dict(record, box=None) for record in _records()[:2]]
     report = _pipeline().evaluate_adaptation(records)
     assert report["box_baseline_records"] == 0
+    assert report["box_prompt_model_mean_iou"] is None
     assert report["box_baseline_mean_iou"] is None
     assert report["delta_over_box_baseline"] is None
+
+
+def test_mixed_prompt_baseline_uses_only_box_records_for_delta():
+    records = _records()[:2]
+    records[1] = dict(records[1], box=None)
+
+    def runner(_image, _points, _labels, box, _multimask):
+        mask = records[0]["mask"] if box is not None else np.zeros((16, 16), dtype=np.bool_)
+        return mask[None], [0.0]
+
+    pipeline = _pipeline()
+    pipeline._runner = runner
+    report = pipeline.evaluate_adaptation(records)
+    assert report["box_baseline_records"] == 1
+    assert report["box_prompt_model_mean_iou"] == 1.0
+    assert report["mean_mask_iou"] == 0.5
+    assert report["delta_over_box_baseline"] == pytest.approx(
+        1.0 - report["box_baseline_mean_iou"]
+    )
 
 
 def test_artifact_round_trip_and_integrity_rejection(tmp_path):

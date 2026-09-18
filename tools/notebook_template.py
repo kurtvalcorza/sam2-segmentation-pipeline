@@ -87,9 +87,9 @@ TEMPLATE = {
                 "    if not mask[int(point[1]), int(point[0])]:\n"
                 "        point = [float(xs[0]), float(ys[0])]\n"
                 "    return {{'id': record_id, 'image': image, 'mask': mask, 'points': [point], 'point_labels': [1], 'box': [float(x0), float(y0), float(x1), float(y1)]}}\n\n"
-                "def generated_records():\n"
+                "def generated_records(start=0, count=24):\n"
                 "    records = []\n"
-                "    for index in range(24):\n"
+                "    for index in range(start, start + count):\n"
                 "        rng = np.random.default_rng(8100 + index)\n"
                 "        image = Image.new('RGB', (256, 256), tuple(int(v) for v in rng.integers(35, 95, 3)))\n"
                 "        draw = ImageDraw.Draw(image)\n"
@@ -129,8 +129,11 @@ TEMPLATE = {
                 "            raise ValueError('BYOD image and mask stems must match exactly')\n"
                 "        records = []\n"
                 "        for key in sorted(images):\n"
-                "            image = Image.open(io.BytesIO(archive.read(images[key]))); image.load()\n"
-                "            mask = Image.open(io.BytesIO(archive.read(masks[key]))); mask.load()\n"
+                "            image = Image.open(io.BytesIO(archive.read(images[key])))\n"
+                "            mask = Image.open(io.BytesIO(archive.read(masks[key])))\n"
+                "            if min(image.size) < MIN_IMAGE_SIDE or max(image.size) > MAX_IMAGE_SIDE or min(mask.size) < MIN_IMAGE_SIDE or max(mask.size) > MAX_IMAGE_SIDE or image.size != mask.size:\n"
+                "                raise ValueError(f'{{key}} image/mask dimensions are mismatched or outside {{MIN_IMAGE_SIDE}}..{{MAX_IMAGE_SIDE}} px')\n"
+                "            image.load(); mask.load()\n"
                 "            records.append(record_from_pair(key, image, mask))\n"
                 "        return records\n\n"
                 "if USE_BYOD:\n"
@@ -186,21 +189,17 @@ TEMPLATE = {
             "md": "## 8. Evaluate the adapted model\n\nScore the untouched holdout after training. The report is sample-sanity, not benchmark evidence.",
             "code": (
                 "adapted_eval = pipe.evaluate_adaptation(val_records)\n"
-                "evaluation_report_e2e = {{'task': 'promptable-image-segmentation-adaptation', 'verdict': 'sample-sanity', 'estimation': 'fixed generated held-out split', 'baseline_pretrained': base_eval, 'adapted': adapted_eval, 'weight_delta_l2': pipe.adaptation_config['weight_delta_l2']}}\n"
+                "split_estimation = 'fixed generated held-out split' if dataset_kind == 'generated' else 'caller-provided BYOD held-out split'\n"
+                "evaluation_report_e2e = {{'task': 'promptable-image-segmentation-adaptation', 'verdict': 'sample-sanity', 'dataset_kind': dataset_kind, 'estimation': split_estimation, 'baseline_pretrained': base_eval, 'adapted': adapted_eval, 'weight_delta_l2': pipe.adaptation_config['weight_delta_l2']}}\n"
                 "with open('outputs/{stem}_evaluation_report.json', 'w', encoding='utf-8') as handle:\n"
                 "    json.dump(evaluation_report_e2e, handle, indent=2)\n"
                 "print(json.dumps({{'baseline_mean_iou': base_eval['mean_mask_iou'], 'adapted_mean_iou': adapted_eval['mean_mask_iou'], 'box_baseline_mean_iou': adapted_eval['box_baseline_mean_iou']}}, indent=2))"
             ),
         },
         {
-            "md": "## 9. Infer on an unseen scene\n\nA horizontally flipped generated record, absent from both splits, exercises adapted serving.",
+            "md": "## 9. Infer on an unseen scene\n\nA separately seeded generated record outside the train/validation index range exercises adapted serving.",
             "code": (
-                "unseen = generated_records()[0].copy()\n"
-                "unseen['id'] = 'unseen-flipped'\n"
-                "unseen['image'] = unseen['image'].transpose(Image.Transpose.FLIP_LEFT_RIGHT)\n"
-                "unseen['mask'] = np.fliplr(unseen['mask']).copy()\n"
-                "ys, xs = np.where(unseen['mask'])\n"
-                "unseen.update({{'points': [[float(np.median(xs)), float(np.median(ys))]], 'point_labels': [1], 'box': [float(xs.min()), float(ys.min()), float(xs.max()+1), float(ys.max()+1)]}})\n"
+                "unseen = generated_records(start=24, count=1)[0]\n"
                 "unseen_result = pipe.segment(unseen['image'], points=unseen['points'], point_labels=unseen['point_labels'], box=unseen['box'], multimask=False)\n"
                 "unseen_iou = mask_iou(unseen_result['masks'][0], unseen['mask'])\n"
                 "print({{'id': unseen['id'], 'mask_iou_sample_sanity': unseen_iou, 'model_iou_score': unseen_result['iou_scores'][0]}})"

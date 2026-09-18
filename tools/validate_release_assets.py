@@ -41,10 +41,13 @@ EXPECTED_OUTPUTS = (
 CODE_MARKERS = (
     "train_manifest = validate_segmentation_dataset(train_records)",
     "val_manifest = validate_segmentation_dataset(val_records)",
+    "if min(image.size) < MIN_IMAGE_SIDE or max(image.size) > MAX_IMAGE_SIDE",
     "base_eval = pipe.evaluate_adaptation(val_records)",
     "parameter_counts = pipe.freeze_for_adaptation()",
     "history = pipe.finetune(train_records, val_records, epochs=2, learning_rate=2e-5, seed=42)",
     "adapted_eval = pipe.evaluate_adaptation(val_records)",
+    "'dataset_kind': dataset_kind",
+    "unseen = generated_records(start=24, count=1)[0]",
     "unseen_result = pipe.segment(",
     "artifact_dir = pipe.save_artifact(",
     "reloaded_pipe = SAM2SegmentationPipeline.from_artifact(",
