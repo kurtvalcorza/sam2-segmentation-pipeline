@@ -184,6 +184,22 @@ def test_finetune_updates_only_declared_adapter_surface():
     assert not torch.equal(before, after)
     assert pipeline.adaptation_config["weight_delta_l2"] > 0
 
+    stored_metadata = json.loads(json.dumps(pipeline.adaptation_config))
+    history[0]["train_loss"] = -1.0
+    history.append({"epoch": 999})
+    assert pipeline.adaptation_config == stored_metadata
+
+
+def test_finetune_rejects_boolean_seed_before_training():
+    pipeline = _pipeline()
+    before = pipeline.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach().clone()
+    with pytest.raises(ValueError, match="seed"):
+        pipeline.finetune(_records()[:2], epochs=1, learning_rate=1e-2, seed=True)
+    assert pipeline.adaptation_config == {}
+    assert torch.equal(
+        before, pipeline.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
+    )
+
 
 def test_finetune_preserves_a_single_pixel_foreground_when_downsampling(monkeypatch):
     mask = np.zeros((16, 16), dtype=np.bool_)
@@ -231,6 +247,31 @@ def test_failed_retraining_restores_weights_and_completion_metadata(monkeypatch)
 
     monkeypatch.setattr(pipeline.model, "forward", non_finite_forward)
     with pytest.raises(RuntimeError, match="non-finite loss"):
+        pipeline.finetune(_records()[:2], epochs=1, learning_rate=1e-2)
+    assert pipeline.adaptation_config == previous_config
+    for name, parameter in pipeline.model.named_parameters():
+        if name in before:
+            assert torch.equal(parameter, before[name])
+
+
+def test_interrupted_retraining_restores_weights_and_completion_metadata(monkeypatch):
+    pipeline = _pipeline()
+    pipeline.freeze_for_adaptation()
+    _mark_completed(pipeline)
+    previous_config = json.loads(json.dumps(pipeline.adaptation_config))
+    before = {
+        name: parameter.detach().clone()
+        for name, parameter in pipeline.model.named_parameters()
+        if parameter.requires_grad
+    }
+    original_step = torch.optim.AdamW.step
+
+    def interrupted_step(optimizer, *args, **kwargs):
+        original_step(optimizer, *args, **kwargs)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(torch.optim.AdamW, "step", interrupted_step)
+    with pytest.raises(KeyboardInterrupt):
         pipeline.finetune(_records()[:2], epochs=1, learning_rate=1e-2)
     assert pipeline.adaptation_config == previous_config
     for name, parameter in pipeline.model.named_parameters():
@@ -394,6 +435,24 @@ def test_artifact_round_trip_and_integrity_rejection(tmp_path):
         rejected_stale_lineage.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
     )
     assert torch.equal(before_stale_lineage, after_stale_lineage)
+
+    invalid_dataset_manifest = json.loads(json.dumps(source.adaptation_config))
+    invalid_dataset_manifest["train_manifest"] = {}
+    manifest["adaptation"] = invalid_dataset_manifest
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    rejected_dataset_manifest = _pipeline()
+    before_dataset_manifest = (
+        rejected_dataset_manifest.model.mask_decoder.output_hypernetworks_mlps[0]
+        .weight.detach()
+        .clone()
+    )
+    with pytest.raises(ValueError, match="train manifest"):
+        rejected_dataset_manifest.load_artifact(artifact)
+    after_dataset_manifest = (
+        rejected_dataset_manifest.model.mask_decoder.output_hypernetworks_mlps[0]
+        .weight.detach()
+    )
+    assert torch.equal(before_dataset_manifest, after_dataset_manifest)
 
     manifest["adaptation"] = source.adaptation_config
     manifest["files"][0]["sha256"] = "0" * 64

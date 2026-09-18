@@ -38,6 +38,13 @@ _ADAPTATION_RUN_FIELDS = (
     "history",
     "weight_delta_l2",
 )
+_DATASET_MANIFEST_FIELDS = {
+    "records",
+    "unique_ids",
+    "positive_pixels",
+    "dataset_sha256",
+    "verdict",
+}
 
 # Input ceilings. The processor resizes every image to 1024x1024 (preprocessor_config.json), so model cost is
 # fixed; the caller's resolution only sets the size of the up-sampled output masks. Prompts are one object per
@@ -66,6 +73,39 @@ def _is_positive_finite_number(value: Any) -> bool:
     )
 
 
+def _validate_dataset_manifest(manifest: Any, *, label: str) -> None:
+    if not isinstance(manifest, Mapping):
+        raise ValueError(f"{label} must be a mapping")
+    if set(manifest) != _DATASET_MANIFEST_FIELDS:
+        raise ValueError(f"{label} does not match the dataset manifest schema")
+    records = manifest["records"]
+    unique_ids = manifest["unique_ids"]
+    positive_pixels = manifest["positive_pixels"]
+    if (
+        not isinstance(records, int)
+        or isinstance(records, bool)
+        or not 2 <= records <= MAX_ADAPTATION_RECORDS
+    ):
+        raise ValueError(f"{label} has an invalid record count")
+    if not isinstance(unique_ids, int) or isinstance(unique_ids, bool) or unique_ids != records:
+        raise ValueError(f"{label} has an invalid unique-id count")
+    if (
+        not isinstance(positive_pixels, int)
+        or isinstance(positive_pixels, bool)
+        or positive_pixels <= 0
+    ):
+        raise ValueError(f"{label} has an invalid positive-pixel count")
+    digest = manifest["dataset_sha256"]
+    if (
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError(f"{label} has an invalid dataset SHA-256")
+    if manifest["verdict"] != "accepted":
+        raise ValueError(f"{label} has an invalid verdict")
+
+
 def _validate_adaptation_run(run: Any, *, label: str) -> None:
     if not isinstance(run, Mapping):
         raise ValueError(f"{label} must be a mapping")
@@ -85,12 +125,11 @@ def _validate_adaptation_run(run: Any, *, label: str) -> None:
         raise ValueError(f"{label} has invalid seed")
     if run["loss"] != "binary-cross-entropy-plus-soft-dice":
         raise ValueError(f"{label} has an unsupported loss")
-    if not isinstance(run["train_manifest"], Mapping):
-        raise ValueError(f"{label} has invalid train manifest")
-    if run["validation_manifest"] is not None and not isinstance(
-        run["validation_manifest"], Mapping
-    ):
-        raise ValueError(f"{label} has invalid validation manifest")
+    _validate_dataset_manifest(run["train_manifest"], label=f"{label} train manifest")
+    if run["validation_manifest"] is not None:
+        _validate_dataset_manifest(
+            run["validation_manifest"], label=f"{label} validation manifest"
+        )
     baseline = run["baseline_validation_mask_iou"]
     if baseline is not None and (
         not isinstance(baseline, int | float)
@@ -642,6 +681,8 @@ class SAM2SegmentationPipeline:
             raise TypeError("learning_rate must be numeric")
         if not 0 < float(learning_rate) <= 1e-2:
             raise ValueError("learning_rate must be in (0, 1e-2]")
+        if not isinstance(seed, int) or isinstance(seed, bool):
+            raise ValueError("seed must be an int")
         train_manifest = validate_segmentation_dataset(train_records)
         val_manifest = validate_segmentation_dataset(val_records) if val_records else None
         if val_records:
@@ -836,16 +877,20 @@ class SAM2SegmentationPipeline:
                 "history": history,
                 "weight_delta_l2": weight_delta_l2,
             }
-            self.adaptation_config.update(completed_run)
-            self.adaptation_config["training_runs"] = [*prior_runs, completed_run]
-        except Exception:
+            stored_run = json.loads(json.dumps(completed_run))
+            self.adaptation_config.update(stored_run)
+            self.adaptation_config["training_runs"] = [
+                *prior_runs,
+                json.loads(json.dumps(stored_run)),
+            ]
+        except BaseException:
             with torch.no_grad():
                 for name, parameter in trainable.items():
                     parameter.copy_(before[name].to(device=parameter.device, dtype=parameter.dtype))
             self.adaptation_config = previous_config
             self.model.eval()
             raise
-        return history
+        return json.loads(json.dumps(history))
 
     def evaluate_adaptation(self, records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         """Evaluate adapted masks against ground truth and a prompt-box baseline."""
