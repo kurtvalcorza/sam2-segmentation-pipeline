@@ -120,6 +120,13 @@ def test_dataset_fingerprint_includes_prompts():
     assert changed != original
 
 
+def test_dataset_validation_rejects_box_that_misses_target_foreground():
+    records = _records()
+    records[0]["box"] = [0.0, 0.0, 2.0, 2.0]
+    with pytest.raises(ValueError, match="box does not overlap target mask foreground"):
+        validate_segmentation_dataset(records)
+
+
 def test_content_fingerprint_includes_image_and_mask_dimensions():
     pixels = np.arange(16 * 32 * 3, dtype=np.uint8)
     mask_values = np.arange(16 * 32) % 2 == 0
@@ -340,6 +347,45 @@ def test_artifact_round_trip_and_integrity_rejection(tmp_path):
         rejected_shape.load_artifact(malformed)
     for name, tensor in rejected_shape.model.state_dict().items():
         assert torch.equal(tensor, before_shape[name])
+
+
+def test_loaded_artifact_refreezes_base_and_supports_continued_finetuning(tmp_path):
+    source = _pipeline()
+    source.freeze_for_adaptation()
+    source.adaptation_config.update({"weight_delta_l2": 1.0, "history": [{"epoch": 1}]})
+    artifact = source.save_artifact(tmp_path / "artifact", producer_revision="c" * 40)
+
+    loaded = _pipeline()
+    loaded.load_artifact(artifact)
+    assert loaded.model.backbone.weight.requires_grad is False
+    assert loaded.model.mask_decoder.output_hypernetworks_mlps[0].weight.requires_grad is True
+
+    history = loaded.finetune(_records()[:2], _records()[2:], epochs=1, learning_rate=1e-2)
+    assert history[0]["optimizer_steps"] == 2
+
+
+def test_adapted_segment_defaults_to_single_mask_and_rejects_multimask():
+    calls = []
+
+    def runner(image, _points, _labels, _box, multimask):
+        calls.append(multimask)
+        count = 3 if multimask else 1
+        return np.zeros((count, image.height, image.width), dtype=np.bool_), [0.0] * count
+
+    pipeline = SAM2SegmentationPipeline(
+        runner,
+        "cpu",
+        adaptation_config={"method": "frozen-backbone-mask-hypernetwork-gradient-adaptation"},
+    )
+    result = pipeline.segment(Image.new("RGB", (16, 16)), box=[1.0, 1.0, 8.0, 8.0])
+    assert result["masks"].shape == (1, 16, 16)
+    assert result["multimask"] is False
+    assert calls == [False]
+
+    with pytest.raises(ValueError, match="adapted pipelines require multimask=False"):
+        pipeline.segment(
+            Image.new("RGB", (16, 16)), box=[1.0, 1.0, 8.0, 8.0], multimask=True
+        )
 
 
 def test_artifact_export_rejects_non_finite_completion_metadata(tmp_path):

@@ -185,6 +185,10 @@ INPUT_SCHEMA: dict[str, Any] = {
     "points": [1, MAX_PROMPTS],
     "point_labels": "one per point, 1 = foreground and 0 = background",
     "box": "at most one [x0, y0, x1, y1] inside the image with x0 < x1 and y0 < y1",
+    "adapted_multimask": (
+        "base pipelines default to three candidates; adapted pipelines default to one mask and reject "
+        "multimask=True because the adapter trains only the single-mask output hypernetwork"
+    ),
     "objects_per_call": 1,
     "multimask_outputs": NUM_MULTIMASK_OUTPUTS,
     "preprocessing": (
@@ -373,6 +377,11 @@ def validate_segmentation_dataset(records: Sequence[Mapping[str, Any]]) -> dict[
                     raise ValueError(
                         f"record {record_id} point ({x}, {y}) label {label} contradicts target mask"
                     )
+        if clean_box is not None:
+            x0, y0 = (math.floor(value) for value in clean_box[:2])
+            x1, y1 = (math.ceil(value) for value in clean_box[2:])
+            if not bool(mask[y0:y1, x0:x1].any()):
+                raise ValueError(f"record {record_id} box does not overlap target mask foreground")
         positive_pixels += area
         digest.update(record_id.encode("utf-8"))
         digest.update(
@@ -868,6 +877,9 @@ class SAM2SegmentationPipeline:
                 raise ValueError(f"artifact tensor {name} contains non-finite values")
         self.model.load_state_dict(state, strict=False)
         self.model.to(self.device).eval()
+        # A fresh base model starts fully trainable. Reapply the declared adapter surface so a
+        # verified artifact can be continued with ``finetune`` without exposing base parameters.
+        self.freeze_for_adaptation()
         self.adaptation_config = dict(adaptation)
         return manifest
 
@@ -894,21 +906,29 @@ class SAM2SegmentationPipeline:
         points: Sequence[Sequence[float]] | None = None,
         point_labels: Sequence[int] | None = None,
         box: Sequence[float] | None = None,
-        multimask: bool = True,
+        multimask: bool | None = None,
     ) -> dict[str, Any]:
-        """Segment one object; returns K boolean masks (K = 3 with multimask, else 1) at input resolution."""
+        """Segment one object, defaulting adapted pipelines to their trained single-mask head."""
+        resolved_multimask = not bool(self.adaptation_config) if multimask is None else multimask
         rgb, clean_points, clean_labels, clean_box = _check_inputs(
-            image, points, point_labels, box, multimask
+            image, points, point_labels, box, resolved_multimask
         )
-        masks, iou_scores = self._runner(rgb, clean_points, clean_labels, clean_box, multimask)
+        if self.adaptation_config and resolved_multimask:
+            raise ValueError(
+                "adapted pipelines require multimask=False because the adapter trains only "
+                "the single-mask output hypernetwork"
+            )
+        masks, iou_scores = self._runner(
+            rgb, clean_points, clean_labels, clean_box, resolved_multimask
+        )
         masks = np.asarray(masks)
-        expected = (NUM_MULTIMASK_OUTPUTS if multimask else 1, rgb.height, rgb.width)
+        expected = (NUM_MULTIMASK_OUTPUTS if resolved_multimask else 1, rgb.height, rgb.width)
         if masks.dtype != np.bool_ or masks.shape != expected or len(iou_scores) != expected[0]:
             raise RuntimeError(f"backend returned {masks.shape} {masks.dtype}, {len(iou_scores)} scores")
         return {
             "masks": masks,
             "iou_scores": [float(v) for v in iou_scores],
-            "multimask": multimask,
+            "multimask": resolved_multimask,
             "points": clean_points,
             "point_labels": clean_labels,
             "box": clean_box,
