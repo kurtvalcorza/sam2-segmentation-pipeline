@@ -1,0 +1,135 @@
+{
+  "dataset": {
+    "kind": "generated",
+    "train": {
+      "records": 18,
+      "unique_ids": 18,
+      "positive_pixels": 132413,
+      "dataset_sha256": "07134d0eb00237a703e610777b353301ea7a6c9101d1c49754d1a4b1a97c2da6",
+      "verdict": "accepted"
+    },
+    "validation": {
+      "records": 6,
+      "unique_ids": 6,
+      "positive_pixels": 42961,
+      "dataset_sha256": "b9dd707b3f2f5029955dd64c520a5901892adcf7c346523ce47e2f08a207e7ee",
+      "verdict": "accepted"
+    },
+    "overlap_ids": []
+  },
+  "adaptation": {
+    "method": "frozen-backbone-mask-hypernetwork-gradient-adaptation",
+    "trainable_prefixes": [
+      "mask_decoder.output_hypernetworks_mlps.0."
+    ],
+    "trainable_parameters": 139808,
+    "frozen_parameters": 38398769,
+    "epochs": 2,
+    "learning_rate": 2e-05,
+    "batch_size": 1,
+    "seed": 42,
+    "loss": "binary-cross-entropy-plus-soft-dice",
+    "train_manifest": {
+      "records": 18,
+      "unique_ids": 18,
+      "positive_pixels": 132413,
+      "dataset_sha256": "07134d0eb00237a703e610777b353301ea7a6c9101d1c49754d1a4b1a97c2da6",
+      "verdict": "accepted"
+    },
+    "validation_manifest": {
+      "records": 6,
+      "unique_ids": 6,
+      "positive_pixels": 42961,
+      "dataset_sha256": "b9dd707b3f2f5029955dd64c520a5901892adcf7c346523ce47e2f08a207e7ee",
+      "verdict": "accepted"
+    },
+    "baseline_validation_mask_iou": 0.9982536177479225,
+    "history": [
+      {
+        "epoch": 1,
+        "train_loss": 0.007102,
+        "optimizer_steps": 18,
+        "val_mask_iou": 0.998383
+      },
+      {
+        "epoch": 2,
+        "train_loss": 0.005357,
+        "optimizer_steps": 18,
+        "val_mask_iou": 0.998457
+      }
+    ],
+    "weight_delta_l2": 0.10881877112418228
+  },
+  "evaluation": {
+    "task": "promptable-image-segmentation-adaptation",
+    "verdict": "sample-sanity",
+    "dataset_kind": "generated",
+    "estimation": "fixed generated held-out split",
+    "baseline_pretrained": {
+      "records": 6,
+      "mean_mask_iou": 0.9982536177479225,
+      "per_record_mask_iou": [
+        1.0,
+        1.0,
+        1.0,
+        0.997370151216305,
+        0.9924382936224854,
+        0.9997132616487455
+      ],
+      "box_baseline_records": 6,
+      "box_prompt_model_mean_iou": 0.9982536177479225,
+      "box_baseline_mean_iou": 0.8566809267647031,
+      "delta_over_box_baseline": 0.14157269098321945
+    },
+    "adapted": {
+      "records": 6,
+      "mean_mask_iou": 0.9984573627246697,
+      "per_record_mask_iou": [
+        0.9998595505617978,
+        1.0,
+        0.9998093785741518,
+        0.9983547219480092,
+        0.9927205252640594,
+        1.0
+      ],
+      "box_baseline_records": 6,
+      "box_prompt_model_mean_iou": 0.9984573627246697,
+      "box_baseline_mean_iou": 0.8566809267647031,
+      "delta_over_box_baseline": 0.14177643595996658
+    },
+    "weight_delta_l2": 0.10881877112418228
+  },
+  "unseen": {
+    "id": "generated-24",
+    "mask_iou": 1.0
+  },
+  "artifact": {
+    "verification": "PASSED",
+    "mask_exact": true,
+    "score_rtol": 1e-05,
+    "score_atol": 1e-06,
+    "artifact_dir": "outputs/sam2-mask-hypernetwork-adapter-v1"
+  },
+  "notebook_source": {
+    "repository": "sam2-segmentation-pipeline",
+    "repository_revision": "bf2ee2d972eb76fea165781ac1206bc65483b987",
+    "embedded_module": "src/sam2_segmentation_pipeline/pipeline.py",
+    "embedded_modules": [
+      "src/sam2_segmentation_pipeline/pipeline.py"
+    ],
+    "module_sha256": "2b37878d8b05582ded0a0d5e48e867b73d7de933e5581b20c14bf8431f7ea24f",
+    "generator": "build_notebook.py/2",
+    "notebook_spec": "2.0"
+  },
+  "repository_revision": "bf2ee2d972eb76fea165781ac1206bc65483b987",
+  "base_model": {
+    "id": "facebook/sam2.1-hiera-small",
+    "revision": "ee5bba1d82bb8749febdf90f45e84b687142ba03"
+  },
+  "runtime": {
+    "python": "3.12.13",
+    "torch": "2.14.0+cu130",
+    "transformers": "4.57.6",
+    "device": "cuda:0"
+  }
+}

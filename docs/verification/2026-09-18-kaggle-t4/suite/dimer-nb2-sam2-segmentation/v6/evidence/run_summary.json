@@ -1,0 +1,236 @@
+{
+ "identity": {
+  "repository": "sam2-segmentation-pipeline",
+  "candidate_sha": "f7a04605efd9b4a4e333e019433089d81e0feb5b",
+  "notebook": "tutorials/sam2_segmentation_colab.ipynb",
+  "committed_blob": "eab8d33961db00c33d37f1c12f96d67024fe1854",
+  "fetched_blob_verified": true,
+  "kaggle_docker_image": "gcr.io/kaggle-gpu-images/python@sha256:37c64f7dd9c54116ecd1bcc88817c5469b88387388fade02bfa8bf3fc647d461",
+  "kaggle_run_type": "Batch",
+  "os": "Linux-6.12.90+-x86_64-with-glibc2.35",
+  "python": "3.12.13",
+  "cpu_count": 4,
+  "image_versions_before_run": {
+   "torch": "2.10.0+cu128",
+   "numpy": "2.0.2",
+   "transformers": "5.0.0",
+   "tokenizers": "0.22.2",
+   "safetensors": "0.7.0",
+   "huggingface-hub": "1.11.0",
+   "pillow": "11.3.0",
+   "nbclient": "0.10.2",
+   "ipykernel": "6.17.1"
+  },
+  "started": "2026-09-18T03:01:55Z",
+  "nvidia_smi": "Tesla T4, 15360 MiB, 580.159.04\nTesla T4, 15360 MiB, 580.159.04",
+  "hf_cache_clean_at_start": true
+ },
+ "runner": {
+  "ok": true,
+  "started": "2026-09-18T03:01:56Z",
+  "passes": [
+   {
+    "attempt": 1,
+    "started": "2026-09-18T03:01:56Z",
+    "ok": false,
+    "error": "CellExecutionError: ━━━ 42.5/42.5 MB 43.9 MB/s eta 0:00:00\n----- stderr -----\nERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.\nbigframes 2.39.0 requires google-cloud-bigquery-storage<3.0.0,>=2.30.0, which is not installed.\nydata-profiling 4.18.4 requires numpy<2.4,>=1.22, but you have numpy 2.5.3 which is incompatible.\ngoogle-colab 1.0.0 requires jupyter-server==2.14.0, but you have jupyter-server 2.12.5 which is incompatible.\ngoogle-colab 1.0.0 requires pandas==2.2.2, but you have pandas 2.3.3 which is incompatible.\ndopamine-rl 4.1.2 requires gym<=0.25.2, but you have gym 0.26.2 which is incompatible.\nmoviepy 1.0.3 requires decorator<5.0,>=4.0.2, but you have decorator 5.3.1 which is incompatible.\nlibcuml-cu12 26.2.0 requires cuda-toolkit[cublas,cufft,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\ncuml-cu12 26.2.0 requires cuda-toolkit[cublas,cufft,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\ncuda-python 12.9.4 requires cuda-bindings~=12.9.4, but you have cuda-bindings 13.4.2 which is incompatible.\ncudf-cu12 26.2.1 requires cuda-toolkit[nvcc,nvrtc]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\nnumba 0.60.0 requires numpy<2.1,>=1.22, but you have numpy 2.5.3 which is incompatible.\nlibcuvs-cu12 26.2.0 requires cuda-toolkit[cublas,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\nlibraft-cu12 26.2.0 requires cuda-toolkit[cublas,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\n------------------\n\n\u001b[0;31m---------------------------------------------------------------------------\u001b[0m\n\u001b[0;31mRuntimeError\u001b[0m                              Traceback (most recent call last)\n\u001b[0;32m/tmp/ipykernel_54/1477132032.py\u001b[0m in \u001b[0;36m<cell line: 0>\u001b[0;34m()\u001b[0m\n\u001b[1;32m     48\u001b[0m             \u001b[0mstale\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mappend\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34mf'{distribution}: loaded={before}, installed={installed}'\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     49\u001b[0m     \u001b[0;32mif\u001b[0m \u001b[0mstale\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m---> 50\u001b[0;31m         \u001b[0;32mraise\u001b[0m \u001b[0mRuntimeError\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34m'Core dependencies changed while older modules were loaded: '\u001b[0m \u001b[0;34m+\u001b[0m \u001b[0;34m'; '\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mjoin\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mstale\u001b[0m\u001b[0;34m)\u001b[0m \u001b[0;34m+\u001b[0m \u001b[0;34m'. Restart the runtime, then rerun from the top.'\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m     51\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     52\u001b[0m \u001b[0;32mimport\u001b[0m \u001b[0mtorch\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mtransformers\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0msafetensors\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\n\u001b[0;31mRuntimeError\u001b[0m: Core dependencies changed while older modules were loaded: cuda-bindings: loaded=12.9.4, installed=13.4.2; numpy: loaded=2.0.2, installed=2.5.3. Restart the runtime, then rerun from the top.\n",
+    "wall_s": 182.0
+   },
+   {
+    "attempt": 2,
+    "started": "2026-09-18T03:04:58Z",
+    "ok": true,
+    "wall_s": 57.0
+   }
+  ],
+  "error": "CellExecutionError: ━━━ 42.5/42.5 MB 43.9 MB/s eta 0:00:00\n----- stderr -----\nERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.\nbigframes 2.39.0 requires google-cloud-bigquery-storage<3.0.0,>=2.30.0, which is not installed.\nydata-profiling 4.18.4 requires numpy<2.4,>=1.22, but you have numpy 2.5.3 which is incompatible.\ngoogle-colab 1.0.0 requires jupyter-server==2.14.0, but you have jupyter-server 2.12.5 which is incompatible.\ngoogle-colab 1.0.0 requires pandas==2.2.2, but you have pandas 2.3.3 which is incompatible.\ndopamine-rl 4.1.2 requires gym<=0.25.2, but you have gym 0.26.2 which is incompatible.\nmoviepy 1.0.3 requires decorator<5.0,>=4.0.2, but you have decorator 5.3.1 which is incompatible.\nlibcuml-cu12 26.2.0 requires cuda-toolkit[cublas,cufft,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\ncuml-cu12 26.2.0 requires cuda-toolkit[cublas,cufft,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\ncuda-python 12.9.4 requires cuda-bindings~=12.9.4, but you have cuda-bindings 13.4.2 which is incompatible.\ncudf-cu12 26.2.1 requires cuda-toolkit[nvcc,nvrtc]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\nnumba 0.60.0 requires numpy<2.1,>=1.22, but you have numpy 2.5.3 which is incompatible.\nlibcuvs-cu12 26.2.0 requires cuda-toolkit[cublas,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\nlibraft-cu12 26.2.0 requires cuda-toolkit[cublas,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\n------------------\n\n\u001b[0;31m---------------------------------------------------------------------------\u001b[0m\n\u001b[0;31mRuntimeError\u001b[0m                              Traceback (most recent call last)\n\u001b[0;32m/tmp/ipykernel_54/1477132032.py\u001b[0m in \u001b[0;36m<cell line: 0>\u001b[0;34m()\u001b[0m\n\u001b[1;32m     48\u001b[0m             \u001b[0mstale\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mappend\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34mf'{distribution}: loaded={before}, installed={installed}'\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     49\u001b[0m     \u001b[0;32mif\u001b[0m \u001b[0mstale\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m---> 50\u001b[0;31m         \u001b[0;32mraise\u001b[0m \u001b[0mRuntimeError\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34m'Core dependencies changed while older modules were loaded: '\u001b[0m \u001b[0;34m+\u001b[0m \u001b[0;34m'; '\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mjoin\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mstale\u001b[0m\u001b[0;34m)\u001b[0m \u001b[0;34m+\u001b[0m \u001b[0;34m'. Restart the runtime, then rerun from the top.'\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m     51\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     52\u001b[0m \u001b[0;32mimport\u001b[0m \u001b[0mtorch\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mtransformers\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0msafetensors\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\n\u001b[0;31mRuntimeError\u001b[0m: Core dependencies changed while older modules were loaded: cuda-bindings: loaded=12.9.4, installed=13.4.2; numpy: loaded=2.0.2, installed=2.5.3. Restart the runtime, then rerun from the top.\n",
+  "traceback": "10.7/10.7 MB 108.2 MB/s eta 0:00:00\n----- stdout -----\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 90.2/90.2 MB 20.4 MB/s eta 0:00:00\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.2/2.2 MB 66.6 MB/s eta 0:00:00\n----- stdout -----\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 214.1/214.1 MB 4.3 MB/s eta 0:00:00\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 53.1 MB/s eta 0:00:00\n----- stdout -----\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 59.5/59.5 MB 30.5 MB/s eta 0:00:00\n----- stdout -----\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 200.9/200.9 MB 7.3 MB/s eta 0:00:00\n----- stdout -----\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 145.9/145.9 MB 5.2 MB/s eta 0:00:00\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 148.0/148.0 kB 7.8 MB/s eta 0:00:00\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.2/7.2 MB 104.2 MB/s eta 0:00:00\n----- stdout -----\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 248.0/248.0 MB 7.4 MB/s eta 0:00:00\n----- stdout -----\n   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 42.5/42.5 MB 43.9 MB/s eta 0:00:00\n----- stderr -----\nERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.\nbigframes 2.39.0 requires google-cloud-bigquery-storage<3.0.0,>=2.30.0, which is not installed.\nydata-profiling 4.18.4 requires numpy<2.4,>=1.22, but you have numpy 2.5.3 which is incompatible.\ngoogle-colab 1.0.0 requires jupyter-server==2.14.0, but you have jupyter-server 2.12.5 which is incompatible.\ngoogle-colab 1.0.0 requires pandas==2.2.2, but you have pandas 2.3.3 which is incompatible.\ndopamine-rl 4.1.2 requires gym<=0.25.2, but you have gym 0.26.2 which is incompatible.\nmoviepy 1.0.3 requires decorator<5.0,>=4.0.2, but you have decorator 5.3.1 which is incompatible.\nlibcuml-cu12 26.2.0 requires cuda-toolkit[cublas,cufft,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\ncuml-cu12 26.2.0 requires cuda-toolkit[cublas,cufft,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\ncuda-python 12.9.4 requires cuda-bindings~=12.9.4, but you have cuda-bindings 13.4.2 which is incompatible.\ncudf-cu12 26.2.1 requires cuda-toolkit[nvcc,nvrtc]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\nnumba 0.60.0 requires numpy<2.1,>=1.22, but you have numpy 2.5.3 which is incompatible.\nlibcuvs-cu12 26.2.0 requires cuda-toolkit[cublas,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\nlibraft-cu12 26.2.0 requires cuda-toolkit[cublas,curand,cusolver,cusparse]==12.*, but you have cuda-toolkit 13.0.3.0 which is incompatible.\n------------------\n\n\u001b[0;31m---------------------------------------------------------------------------\u001b[0m\n\u001b[0;31mRuntimeError\u001b[0m                              Traceback (most recent call last)\n\u001b[0;32m/tmp/ipykernel_54/1477132032.py\u001b[0m in \u001b[0;36m<cell line: 0>\u001b[0;34m()\u001b[0m\n\u001b[1;32m     48\u001b[0m             \u001b[0mstale\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mappend\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34mf'{distribution}: loaded={before}, installed={installed}'\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     49\u001b[0m     \u001b[0;32mif\u001b[0m \u001b[0mstale\u001b[0m\u001b[0;34m:\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m---> 50\u001b[0;31m         \u001b[0;32mraise\u001b[0m \u001b[0mRuntimeError\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34m'Core dependencies changed while older modules were loaded: '\u001b[0m \u001b[0;34m+\u001b[0m \u001b[0;34m'; '\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mjoin\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mstale\u001b[0m\u001b[0;34m)\u001b[0m \u001b[0;34m+\u001b[0m \u001b[0;34m'. Restart the runtime, then rerun from the top.'\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m     51\u001b[0m \u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     52\u001b[0m \u001b[0;32mimport\u001b[0m \u001b[0mtorch\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mtransformers\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0msafetensors\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\n\u001b[0;31mRuntimeError\u001b[0m: Core dependencies changed while older modules were loaded: cuda-bindings: loaded=12.9.4, installed=13.4.2; numpy: loaded=2.0.2, installed=2.5.3. Restart the runtime, then rerun from the top.\n\n",
+  "restarted_after_install_cell": true,
+  "wall_s": 239.1,
+  "finished": "2026-09-18T03:05:55Z"
+ },
+ "cells": [
+  {
+   "cell": 3,
+   "status": "ok",
+   "started": "2026-09-18T03:04:59.924677Z",
+   "ended": "2026-09-18T03:05:15.049624Z",
+   "stdout_tail": "{'notebook_source': {'repository': 'sam2-segmentation-pipeline', 'repository_revision': '1814d040490d11930fa2f8239a846f321717f2e2', 'embedded_module': 'src/sam2_segmentation_pipeline/pipeline.py', 'embedded_modules': ['src/sam2_segmentation_pipeline/pipeline.py'], 'module_sha256': '0d05974f63e4e6fa3e2df5800ce53643e7883a4916350802198e233fe8090edb', 'generator': 'build_notebook.py/2', 'notebook_spec': '2.0'}, 'python': '3.12.13', 'torch': '2.14.0+cu130', 'transformers': '4.57.6', 'safetensors': '0.8.0', 'cuda': True}\n",
+   "error": null
+  },
+  {
+   "cell": 5,
+   "status": "ok",
+   "started": "2026-09-18T03:05:15.054419Z",
+   "ended": "2026-09-18T03:05:15.151426Z",
+   "stdout_tail": "",
+   "error": null
+  },
+  {
+   "cell": 7,
+   "status": "ok",
+   "started": "2026-09-18T03:05:15.155517Z",
+   "ended": "2026-09-18T03:05:43.325527Z",
+   "stdout_tail": "{'model_id': 'facebook/sam2.1-hiera-small', 'revision': 'ee5bba1d82bb8749febdf90f45e84b687142ba03', 'license': 'apache-2.0', 'files': 7, 'total_bytes': 184336196}\nREADME.md: 0.00B [00:00, ?B/s]config.json: 0.00B [00:00, ?B/s]model.safetensors:   0%|          | 0.00/184M [00:00<?, ?B/s]preprocessor_config.json:   0%|          | 0.00/683 [00:00<?, ?B/s]processor_config.json:   0%|          | 0.00/95.0 [00:00<?, ?B/s]sam2.1_hiera_s.yaml: 0.00B [00:00, ?B/s]video_preprocessor_config.json:   0%|          | 0.00/705 [00:00<?, ?B/s]{'weights_dir': '/content/weights/sam2.1-hiera-small', 'fetched': ['README.md', 'config.json', 'model.safetensors', 'preprocessor_config.json', 'processor_config.json', 'sam2.1_hiera_s.yaml', 'video_preprocessor_config.json']}\n{'verified_files': 7, 'revision': 'ee5bba1d82bb8749febdf90f45e84b687142ba03'}\nYou are using a model of type sam2_video to instantiate a model of type sam2. This is not supported for all configurations of models and can yield errors.\n{'device': 'cuda:0', 'source': 'local-snapshot'}\n",
+   "error": null
+  },
+  {
+   "cell": 9,
+   "status": "ok",
+   "started": "2026-09-18T03:05:43.329489Z",
+   "ended": "2026-09-18T03:05:43.380851Z",
+   "stdout_tail": "{'dataset_kind': 'generated', 'records': 24, 'train': 18, 'held_out': 6}\n",
+   "error": null
+  },
+  {
+   "cell": 11,
+   "status": "ok",
+   "started": "2026-09-18T03:05:43.384733Z",
+   "ended": "2026-09-18T03:05:43.417202Z",
+   "stdout_tail": "{\n  \"kind\": \"generated\",\n  \"train\": {\n    \"records\": 18,\n    \"unique_ids\": 18,\n    \"positive_pixels\": 132413,\n    \"dataset_sha256\": \"f6b73d6f5e1d82cbd80a646df19f7c510e42bdc9c67163a090f332578eb41099\",\n    \"verdict\": \"accepted\"\n  },\n  \"validation\": {\n    \"records\": 6,\n    \"unique_ids\": 6,\n    \"positive_pixels\": 42961,\n    \"dataset_sha256\": \"a98b8bfddb3c2f43a8afedcf34ac7a3a2aa4a6aba198c0cb86ddf075a2c205fc\",\n    \"verdict\": \"accepted\"\n  },\n  \"overlap_ids\": []\n}\n",
+   "error": null
+  },
+  {
+   "cell": 13,
+   "status": "ok",
+   "started": "2026-09-18T03:05:43.420943Z",
+   "ended": "2026-09-18T03:05:45.093263Z",
+   "stdout_tail": "{'records': 6, 'mean_mask_iou': 0.998254, 'box_baseline_records': 6, 'box_prompt_model_mean_iou': 0.998254, 'box_baseline_mean_iou': 0.856681, 'delta_over_box_baseline': 0.141573}\n",
+   "error": null
+  },
+  {
+   "cell": 15,
+   "status": "ok",
+   "started": "2026-09-18T03:05:45.097588Z",
+   "ended": "2026-09-18T03:05:49.973724Z",
+   "stdout_tail": "{'parameters': {'trainable_parameters': 139808, 'frozen_parameters': 38398769}, 'history': [{'epoch': 1, 'train_loss': 0.007102, 'optimizer_steps': 18, 'val_mask_iou': 0.998383}, {'epoch': 2, 'train_loss': 0.005357, 'optimizer_steps': 18, 'val_mask_iou': 0.998457}], 'weight_delta_l2': 0.10881877112418228}\n",
+   "error": null
+  },
+  {
+   "cell": 17,
+   "status": "ok",
+   "started": "2026-09-18T03:05:49.977571Z",
+   "ended": "2026-09-18T03:05:50.936002Z",
+   "stdout_tail": "{\n  \"baseline_mean_iou\": 0.9982536177479225,\n  \"adapted_mean_iou\": 0.9984573627246697,\n  \"box_baseline_mean_iou\": 0.8566809267647031\n}\n",
+   "error": null
+  },
+  {
+   "cell": 19,
+   "status": "ok",
+   "started": "2026-09-18T03:05:50.940018Z",
+   "ended": "2026-09-18T03:05:51.102723Z",
+   "stdout_tail": "{'id': 'generated-24', 'mask_iou_sample_sanity': 1.0, 'model_iou_score': 0.9924384951591492}\n",
+   "error": null
+  },
+  {
+   "cell": 21,
+   "status": "ok",
+   "started": "2026-09-18T03:05:51.107062Z",
+   "ended": "2026-09-18T03:05:52.018263Z",
+   "stdout_tail": "You are using a model of type sam2_video to instantiate a model of type sam2. This is not supported for all configurations of models and can yield errors.\n{'verification': 'PASSED', 'mask_exact': True, 'score_rtol': 1e-05, 'score_atol': 1e-06, 'artifact_dir': 'outputs/sam2-mask-hypernetwork-adapter-v1'}\n",
+   "error": null
+  },
+  {
+   "cell": 23,
+   "status": "ok",
+   "started": "2026-09-18T03:05:52.022537Z",
+   "ended": "2026-09-18T03:05:52.028375Z",
+   "stdout_tail": "{'status': 'E2E COMPLETE', 'train_records': 18, 'held_out_records': 6, 'optimizer_steps': 36, 'weight_delta_l2': 0.10881877112418228, 'reload': 'PASSED', 'outputs': ['sam2-mask-hypernetwork-adapter-v1', 'sam2_segmentation_dataset_manifest.json', 'sam2_segmentation_evaluation_report.json', 'sam2_segmentation_result.json']}\n",
+   "error": null
+  }
+ ],
+ "preserved_outputs": {
+  "sam2_segmentation_dataset_manifest.json": {
+   "bytes": 460,
+   "sha256": "7902c1973ac6f9eede78edf397da99f3debafc63f1e15a8af525ed889d7fd769"
+  },
+  "sam2_segmentation_evaluation_report.json": {
+   "bytes": 1053,
+   "sha256": "a1c0325b77c65a36634fc7ff5a02c271849b4307dec26368b1d6319282a12867"
+  },
+  "sam2_segmentation_result.json": {
+   "bytes": 3918,
+   "sha256": "29d63c116842d1bd5a4b8e52046442705b5076df47f34a22ae071d379d051efb"
+  },
+  "sam2-mask-hypernetwork-adapter-v1/adapter.safetensors": {
+   "bytes": 559960,
+   "sha256": "5d5d9d628473c5d9e014daceea73964557bd55f321a1d34b654d9c94b74f9810"
+  },
+  "sam2-mask-hypernetwork-adapter-v1/manifest.json": {
+   "bytes": 2108,
+   "sha256": "b77648d5581b93b287a779be145b9d5879f11ae21f3521be0acda213063334ab"
+  }
+ },
+ "staged_weights": [
+  {
+   "path": "sam2.1-hiera-small/README.md",
+   "bytes": 19974
+  },
+  {
+   "path": "sam2.1-hiera-small/config.json",
+   "bytes": 5698
+  },
+  {
+   "path": "sam2.1-hiera-small/dimer-base-manifest.json",
+   "bytes": 1317
+  },
+  {
+   "path": "sam2.1-hiera-small/model.safetensors",
+   "bytes": 184305280
+  },
+  {
+   "path": "sam2.1-hiera-small/preprocessor_config.json",
+   "bytes": 683
+  },
+  {
+   "path": "sam2.1-hiera-small/processor_config.json",
+   "bytes": 95
+  },
+  {
+   "path": "sam2.1-hiera-small/sam2.1_hiera_s.yaml",
+   "bytes": 3761
+  },
+  {
+   "path": "sam2.1-hiera-small/video_preprocessor_config.json",
+   "bytes": 705
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/.gitignore",
+   "bytes": 1
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/download/README.md.metadata",
+   "bytes": 101
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/download/config.json.metadata",
+   "bytes": 100
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/download/model.safetensors.metadata",
+   "bytes": 125
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/download/preprocessor_config.json.metadata",
+   "bytes": 101
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/download/processor_config.json.metadata",
+   "bytes": 101
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/download/sam2.1_hiera_s.yaml.metadata",
+   "bytes": 101
+  },
+  {
+   "path": "sam2.1-hiera-small/.cache/huggingface/download/video_preprocessor_config.json.metadata",
+   "bytes": 101
+  }
+ ],
+ "executor_torch_after_run": {
+  "torch": "2.14.0+cu130",
+  "cuda": "13.0",
+  "device": "Tesla T4"
+ },
+ "finished": "2026-09-18T03:05:57Z"
+}

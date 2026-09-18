@@ -1,6 +1,7 @@
 from .pipeline import (
     DEFAULT_WEIGHTS_DIR,
     INPUT_SCHEMA,
+    MAX_ADAPTATION_PIXELS,
     MAX_IMAGE_SIDE,
     MAX_PROMPTS,
     MIN_IMAGE_SIDE,
@@ -14,12 +15,14 @@ from .pipeline import (
     mask_iou,
     stage_missing_files,
     validate_inputs,
+    validate_segmentation_dataset,
     verify_snapshot,
 )
 
 __all__ = [
     "DEFAULT_WEIGHTS_DIR",
     "INPUT_SCHEMA",
+    "MAX_ADAPTATION_PIXELS",
     "MAX_IMAGE_SIDE",
     "MAX_PROMPTS",
     "MIN_IMAGE_SIDE",
@@ -33,5 +36,6 @@ __all__ = [
     "mask_iou",
     "stage_missing_files",
     "validate_inputs",
+    "validate_segmentation_dataset",
     "verify_snapshot",
 ]

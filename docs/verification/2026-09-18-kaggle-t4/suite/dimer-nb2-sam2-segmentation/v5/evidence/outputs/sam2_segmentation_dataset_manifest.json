@@ -1,0 +1,18 @@
+{
+  "kind": "generated",
+  "train": {
+    "records": 18,
+    "unique_ids": 18,
+    "positive_pixels": 132413,
+    "dataset_sha256": "f6b73d6f5e1d82cbd80a646df19f7c510e42bdc9c67163a090f332578eb41099",
+    "verdict": "accepted"
+  },
+  "validation": {
+    "records": 6,
+    "unique_ids": 6,
+    "positive_pixels": 42961,
+    "dataset_sha256": "a98b8bfddb3c2f43a8afedcf34ac7a3a2aa4a6aba198c0cb86ddf075a2c205fc",
+    "verdict": "accepted"
+  },
+  "overlap_ids": []
+}
