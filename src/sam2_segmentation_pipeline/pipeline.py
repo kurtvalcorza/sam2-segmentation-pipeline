@@ -356,17 +356,33 @@ def validate_segmentation_dataset(records: Sequence[Mapping[str, Any]]) -> dict[
         area = int(mask.sum())
         if area == 0 or area == mask.size:
             raise ValueError(f"record {record_id} mask must contain foreground and background")
-        validate_prompts(
+        clean_points, clean_labels, clean_box = validate_prompts(
             image.width,
             image.height,
             record.get("points"),
             record.get("point_labels"),
             record.get("box"),
         )
+        if clean_points is not None and clean_labels is not None:
+            for (x, y), label in zip(clean_points, clean_labels, strict=True):
+                row = min(int(y), image.height - 1)
+                column = min(int(x), image.width - 1)
+                pixel_is_foreground = bool(mask[row, column])
+                if pixel_is_foreground != bool(label):
+                    raise ValueError(
+                        f"record {record_id} point ({x}, {y}) label {label} contradicts target mask"
+                    )
         positive_pixels += area
         digest.update(record_id.encode("utf-8"))
         digest.update(np.asarray(image, dtype=np.uint8).tobytes())
         digest.update(mask.tobytes())
+        digest.update(
+            json.dumps(
+                {"points": clean_points, "point_labels": clean_labels, "box": clean_box},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
 
     return {
         "records": len(records),
@@ -375,6 +391,29 @@ def validate_segmentation_dataset(records: Sequence[Mapping[str, Any]]) -> dict[
         "dataset_sha256": digest.hexdigest(),
         "verdict": "accepted",
     }
+
+
+def _segmentation_record_content_sha256(record: Mapping[str, Any]) -> str:
+    """Fingerprint one validated image/mask/prompt record without its caller-supplied ID."""
+    image = validate_image(record["image"])
+    clean_points, clean_labels, clean_box = validate_prompts(
+        image.width,
+        image.height,
+        record.get("points"),
+        record.get("point_labels"),
+        record.get("box"),
+    )
+    digest = hashlib.sha256()
+    digest.update(np.asarray(image, dtype=np.uint8).tobytes())
+    digest.update(np.asarray(record["mask"], dtype=np.bool_).tobytes())
+    digest.update(
+        json.dumps(
+            {"points": clean_points, "point_labels": clean_labels, "box": clean_box},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    return digest.hexdigest()
 
 
 @dataclass
@@ -483,6 +522,22 @@ class SAM2SegmentationPipeline:
             raise ValueError("learning_rate must be in (0, 1e-2]")
         train_manifest = validate_segmentation_dataset(train_records)
         val_manifest = validate_segmentation_dataset(val_records) if val_records else None
+        if val_records:
+            train_ids = {str(record["id"]) for record in train_records}
+            val_ids = {str(record["id"]) for record in val_records}
+            overlapping_ids = sorted(train_ids & val_ids)
+            if overlapping_ids:
+                raise ValueError(
+                    f"train and validation records overlap by id: {overlapping_ids[:5]}"
+                )
+            train_content = {
+                _segmentation_record_content_sha256(record) for record in train_records
+            }
+            val_content = {
+                _segmentation_record_content_sha256(record) for record in val_records
+            }
+            if train_content & val_content:
+                raise ValueError("train and validation records overlap by image/mask/prompt content")
         if not self.adaptation_config:
             self.freeze_for_adaptation()
         if any(
@@ -518,14 +573,15 @@ class SAM2SegmentationPipeline:
             ).to(device)
             with torch.inference_mode():
                 embeddings = [
-                    item.detach() for item in self.model.get_image_embeddings(batch["pixel_values"])
+                    item.detach().cpu()
+                    for item in self.model.get_image_embeddings(batch["pixel_values"])
                 ]
             prompts = {
-                key: batch[key]
+                key: batch[key].detach().cpu()
                 for key in ("input_points", "input_labels", "input_boxes")
                 if key in batch
             }
-            target = torch.from_numpy(np.asarray(record["mask"], dtype=np.float32)).to(device)
+            target = torch.from_numpy(np.asarray(record["mask"], dtype=np.float32))
             return embeddings, prompts, target
 
         cached_train = [prepare(record) for record in train_records]
@@ -538,11 +594,16 @@ class SAM2SegmentationPipeline:
             self.model.eval()
             with torch.inference_mode():
                 for embeddings, prompts, target in cached:
+                    device_embeddings = [item.to(device) for item in embeddings]
+                    device_prompts = {key: value.to(device) for key, value in prompts.items()}
+                    device_target = target.to(device)
                     logits = self.model(
-                        image_embeddings=embeddings, multimask_output=False, **prompts
+                        image_embeddings=device_embeddings,
+                        multimask_output=False,
+                        **device_prompts,
                     ).pred_masks[0, 0, 0]
                     target_low = F.interpolate(
-                        target[None, None], size=logits.shape, mode="nearest"
+                        device_target[None, None], size=logits.shape, mode="nearest"
                     )[0, 0].bool()
                     values.append(mask_iou((logits > MASK_THRESHOLD).cpu().numpy(), target_low.cpu().numpy()))
             return float(np.mean(values)) if values else 0.0
@@ -555,11 +616,18 @@ class SAM2SegmentationPipeline:
             total_loss = 0.0
             for index in order:
                 embeddings, prompts, target = cached_train[index]
+                device_embeddings = [item.to(device) for item in embeddings]
+                device_prompts = {key: value.to(device) for key, value in prompts.items()}
+                device_target = target.to(device)
                 optimizer.zero_grad(set_to_none=True)
                 logits = self.model(
-                    image_embeddings=embeddings, multimask_output=False, **prompts
+                    image_embeddings=device_embeddings,
+                    multimask_output=False,
+                    **device_prompts,
                 ).pred_masks[0, 0, 0]
-                target_low = F.interpolate(target[None, None], size=logits.shape, mode="nearest")[0, 0]
+                target_low = F.interpolate(
+                    device_target[None, None], size=logits.shape, mode="nearest"
+                )[0, 0]
                 probabilities = logits.sigmoid()
                 bce = F.binary_cross_entropy_with_logits(logits, target_low)
                 dice = 1.0 - (2.0 * (probabilities * target_low).sum() + 1.0) / (
@@ -616,26 +684,41 @@ class SAM2SegmentationPipeline:
             )
             target = np.asarray(record["mask"], dtype=np.bool_)
             model_ious.append(mask_iou(result["masks"][0], target))
-            baseline = np.zeros_like(target)
             box = record.get("box")
             if box is not None:
+                baseline = np.zeros_like(target)
                 x0, y0, x1, y1 = (int(round(value)) for value in box)
                 baseline[y0:y1, x0:x1] = True
-            box_ious.append(mask_iou(baseline, target))
+                box_ious.append(mask_iou(baseline, target))
+        box_baseline_mean_iou = float(np.mean(box_ious)) if box_ious else None
         return {
             "records": len(records),
             "mean_mask_iou": float(np.mean(model_ious)),
             "per_record_mask_iou": model_ious,
-            "box_baseline_mean_iou": float(np.mean(box_ious)),
-            "delta_over_box_baseline": float(np.mean(model_ious) - np.mean(box_ious)),
+            "box_baseline_records": len(box_ious),
+            "box_baseline_mean_iou": box_baseline_mean_iou,
+            "delta_over_box_baseline": (
+                None
+                if box_baseline_mean_iou is None
+                else float(np.mean(model_ious) - box_baseline_mean_iou)
+            ),
         }
 
     def save_artifact(self, output_dir: str | Path, *, producer_revision: str) -> Path:
         """Write a safe mask-hypernetwork adapter plus a closed integrity manifest."""
         from safetensors.torch import save_file
 
-        if self.model is None or not self.adaptation_config:
-            raise RuntimeError("artifact export requires an adapted model")
+        weight_delta = self.adaptation_config.get("weight_delta_l2")
+        history = self.adaptation_config.get("history")
+        if (
+            self.model is None
+            or not isinstance(weight_delta, int | float)
+            or isinstance(weight_delta, bool)
+            or weight_delta <= 0
+            or not isinstance(history, list)
+            or not history
+        ):
+            raise RuntimeError("artifact export requires completed fine-tuning with a positive weight delta")
         if len(producer_revision) != 40 or any(ch not in "0123456789abcdef" for ch in producer_revision):
             raise ValueError("producer_revision must be a lowercase 40-hex Git commit")
         root = Path(output_dir)
@@ -688,11 +771,11 @@ class SAM2SegmentationPipeline:
         if not manifest_path.is_file():
             raise FileNotFoundError(f"artifact manifest not found: {manifest_path}")
         expected_files = {ARTIFACT_MANIFEST_NAME, ARTIFACT_WEIGHTS_NAME}
-        actual_files = {path.name for path in root.iterdir() if path.is_file()}
-        if actual_files != expected_files:
+        actual_entries = {path.name for path in root.iterdir()}
+        if actual_entries != expected_files:
             raise ValueError(
                 f"artifact directory must contain exactly {sorted(expected_files)}, "
-                f"found {sorted(actual_files)}"
+                f"found {sorted(actual_entries)}"
             )
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("format") != ARTIFACT_FORMAT:
@@ -714,6 +797,9 @@ class SAM2SegmentationPipeline:
             raise FileNotFoundError(f"artifact weights not found: {weights_path}")
         if weights_path.stat().st_size != entry.get("bytes") or _sha256(weights_path) != entry.get("sha256"):
             raise ValueError("artifact weights failed size or SHA-256 verification")
+        adaptation = manifest.get("adaptation")
+        if not isinstance(adaptation, dict):
+            raise ValueError("artifact adaptation metadata must be a mapping")
         state = load_file(str(weights_path), device=self.device)
         expected = {
             name for name in self.model.state_dict() if name.startswith(TRAINABLE_PREFIXES)
@@ -722,9 +808,6 @@ class SAM2SegmentationPipeline:
             raise ValueError("artifact tensor inventory does not match the declared adapter surface")
         self.model.load_state_dict(state, strict=False)
         self.model.to(self.device).eval()
-        adaptation = manifest.get("adaptation")
-        if not isinstance(adaptation, dict):
-            raise ValueError("artifact adaptation metadata must be a mapping")
         self.adaptation_config = dict(adaptation)
         return manifest
 

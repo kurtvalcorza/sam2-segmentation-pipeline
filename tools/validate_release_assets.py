@@ -306,6 +306,10 @@ def validate_release_status() -> None:
     _check(match is not None, "STATUS.md must declare 'Current status: **Candidate**' or '**Release-grade**'")
     token = match.group(1)
     readme = _read(ROOT / "README.md")
+    _check(
+        "val_records=heldout_records" in readme and "validation_records=" not in readme,
+        "README.md must use the actual finetune(..., val_records=...) keyword",
+    )
     _check("## Release status" in readme, "README.md must have a '## Release status' section")
     section = readme.split("## Release status", 1)[1]
     _check(section.lstrip().startswith(f"**{token}"), f"README.md release status must open with **{token}**")

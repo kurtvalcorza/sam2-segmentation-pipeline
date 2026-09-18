@@ -96,6 +96,19 @@ def test_dataset_validation_rejects_duplicate_ids_and_non_boolean_masks():
     with pytest.raises(TypeError, match="mask must be boolean"):
         validate_segmentation_dataset(records)
 
+    records = _records()
+    records[0]["points"] = [[0.0, 0.0]]
+    with pytest.raises(ValueError, match="contradicts target mask"):
+        validate_segmentation_dataset(records)
+
+
+def test_dataset_fingerprint_includes_prompts():
+    records = _records()
+    original = validate_segmentation_dataset(records)["dataset_sha256"]
+    records[0]["box"] = [3.0, 2.0, 13.0, 14.0]
+    changed = validate_segmentation_dataset(records)["dataset_sha256"]
+    assert changed != original
+
 
 def test_finetune_updates_only_declared_adapter_surface():
     pipeline = _pipeline()
@@ -110,10 +123,28 @@ def test_finetune_updates_only_declared_adapter_surface():
     assert pipeline.adaptation_config["weight_delta_l2"] > 0
 
 
+def test_finetune_rejects_train_validation_overlap_by_id_or_content():
+    records = _records()
+    with pytest.raises(ValueError, match="overlap by id"):
+        _pipeline().finetune(records[:2], records[1:3], epochs=1)
+
+    renamed = dict(records[0], id="renamed-shape")
+    with pytest.raises(ValueError, match="overlap by image/mask/prompt content"):
+        _pipeline().finetune(records[:2], [renamed, records[2]], epochs=1)
+
+
+def test_point_only_evaluation_omits_box_baseline():
+    records = [dict(record, box=None) for record in _records()[:2]]
+    report = _pipeline().evaluate_adaptation(records)
+    assert report["box_baseline_records"] == 0
+    assert report["box_baseline_mean_iou"] is None
+    assert report["delta_over_box_baseline"] is None
+
+
 def test_artifact_round_trip_and_integrity_rejection(tmp_path):
     source = _pipeline()
     source.freeze_for_adaptation()
-    source.adaptation_config["weight_delta_l2"] = 1.0
+    source.adaptation_config.update({"weight_delta_l2": 1.0, "history": [{"epoch": 1}]})
     artifact = source.save_artifact(tmp_path / "artifact", producer_revision="a" * 40)
 
     fresh = _pipeline()
@@ -128,8 +159,24 @@ def test_artifact_round_trip_and_integrity_rejection(tmp_path):
         _pipeline().load_artifact(artifact)
     unexpected.unlink()
 
+    unexpected_dir = artifact / "retained-data"
+    unexpected_dir.mkdir()
+    with pytest.raises(ValueError, match="contain exactly"):
+        _pipeline().load_artifact(artifact)
+    unexpected_dir.rmdir()
+
     manifest_path = artifact / ARTIFACT_MANIFEST_NAME
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["adaptation"] = []
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    rejected = _pipeline()
+    before = rejected.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach().clone()
+    with pytest.raises(ValueError, match="adaptation metadata"):
+        rejected.load_artifact(artifact)
+    after = rejected.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
+    assert torch.equal(before, after)
+
+    manifest["adaptation"] = source.adaptation_config
     manifest["files"][0]["sha256"] = "0" * 64
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="SHA-256"):

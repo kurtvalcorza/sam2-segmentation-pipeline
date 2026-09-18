@@ -32,7 +32,7 @@ mask = result["masks"][0]
 # print(mask_iou(mask, reference_bool_mask))
 
 # optional E2E adaptation (use a separate held-out split)
-# report = pipe.finetune(train_records, validation_records=heldout_records, epochs=2)
+# report = pipe.finetune(train_records, val_records=heldout_records, epochs=2)
 # pipe.save_artifact("outputs/sam2-adapter", producer_revision="<git-sha>")
 # reloaded = SAM2SegmentationPipeline.from_artifact("outputs/sam2-adapter")
 ```
@@ -63,7 +63,7 @@ weights/sam2.1-hiera-small/
 
 ## Release status
 
-**Candidate.** Exact commit `2bc18f1` and notebook blob `d7d1cb7f803e` passed an 11/11-cell clean Kaggle T4 `Run all`. The clean-runtime gate is recorded in `docs/release-verification.md`; status remains Candidate until reviewer/integrator promotion.
+**Candidate.** Review remediation changes the executable carrier, so the earlier exact-blob qualification does not apply to the current revision. A fresh 11-cell Kaggle T4 `Run all` is required and will be recorded in `docs/release-verification.md` before reviewer/integrator promotion.
 
 ## Documentation
 

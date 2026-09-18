@@ -65,7 +65,7 @@ The upstream training masks were produced by a model-in-the-loop annotation engi
 
 ###### Environment
 
-The declared notebook environment is Python 3.12 with `torch==2.14.0`, `transformers==4.57.6`, and the exact pins in `pyproject.toml`. Exact blob `d7d1cb7f803e` completed clean-room execution on Kaggle Python 3.12.13 with PyTorch 2.14.0+cu130 and a Tesla T4; the full evidence is recorded under `docs/verification/2026-09-18-kaggle-t4/`. Model cost is dominated by the fixed 1024x1024 working resolution, while the caller's resolution mostly sets the size of up-sampled masks. The model assumes an ordinary photograph with a visible prompted boundary; low contrast, transparency, thin structures, and heavy occlusion can still produce masks that bleed or fragment.
+The declared notebook environment is Python 3.12 with `torch==2.14.0`, `transformers==4.57.6`, and the exact pins in `pyproject.toml`. The earlier E2E blob completed clean-room execution on Kaggle Python 3.12.13 with PyTorch 2.14.0+cu130 and a Tesla T4, but the current review-remediation revision requires fresh exact-blob execution before promotion. Model cost is dominated by the fixed 1024x1024 working resolution, while the caller's resolution mostly sets the size of up-sampled masks. The model assumes an ordinary photograph with a visible prompted boundary; low contrast, transparency, thin structures, and heavy occlusion can still produce masks that bleed or fragment.
 
 #### Metrics
 
@@ -137,7 +137,7 @@ Prohibited even where the model would work: covert surveillance or tracking of i
 - Precision: float32; preprocessing resize to 1024x1024, bilinear, ImageNet mean/std (`Sam2ImageProcessorFast` from the snapshot); masks decoded at 256x256 and up-sampled to the input size, binarised at logit 0.
 - Measured 2026-09-12 in the Windows venv (`torch 2.14.0+cu130`) with `CUDA_VISIBLE_DEVICES=""`, device `cpu`: `verify_snapshot` 0.12 s (7 files, 184 MB); load 4.80 s; `segment` on a synthetic 320x240 scene (grey background, dark rectangle at [40, 60, 140, 180], red disc at [200, 80, 280, 160]) with one foreground click at (90, 120) → `masks (3, 240, 320)` bool, `iou_scores` [0.010, 0.993, 0.400], areas [1767, 12220, 19768] px, `mask_iou` of the argmax candidate against the drawn rectangle 1.000, 0.962 s; box `[200, 80, 281, 161]` with `multimask=False` → one mask of 5145 px (drawn disc about 5026 px), `iou_scores` [0.987], 0.938 s; 4096x4096 uniform-noise image with a box → `(1, 4096, 4096)` in 1.19 s. Process wall 11 s.
 - Tests: `pytest -q -o addopts= tests` — 11 passed, offline, no weights required; `ruff check src tests` clean.
-- Not executed: CUDA path, bfloat16 autocast, video mode, any IoU measurement against real labelled masks.
+- Not executed: bfloat16 autocast, video mode, any IoU measurement against real labelled masks, or a CUDA throughput benchmark.
 
 - **Load-time notice (expected):** transformers logs `You are using a model of type sam2_video to instantiate a model of type sam2` on every load, because the pinned snapshot's `config.json` declares `model_type: sam2_video` while this pipeline deliberately instantiates the image-only `Sam2Model`. The message is a config-name mismatch, not an error; the owner chose on 2026-09-12 to keep `Sam2Model` and document the line rather than load the video class or filter the logger.
 
