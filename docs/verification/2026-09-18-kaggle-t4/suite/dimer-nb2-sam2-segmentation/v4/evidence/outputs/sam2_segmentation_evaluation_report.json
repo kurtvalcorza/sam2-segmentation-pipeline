@@ -1,0 +1,39 @@
+{
+  "task": "promptable-image-segmentation-adaptation",
+  "verdict": "sample-sanity",
+  "dataset_kind": "generated",
+  "estimation": "fixed generated held-out split",
+  "baseline_pretrained": {
+    "records": 6,
+    "mean_mask_iou": 0.9982536177479225,
+    "per_record_mask_iou": [
+      1.0,
+      1.0,
+      1.0,
+      0.997370151216305,
+      0.9924382936224854,
+      0.9997132616487455
+    ],
+    "box_baseline_records": 6,
+    "box_prompt_model_mean_iou": 0.9982536177479225,
+    "box_baseline_mean_iou": 0.8566809267647031,
+    "delta_over_box_baseline": 0.14157269098321945
+  },
+  "adapted": {
+    "records": 6,
+    "mean_mask_iou": 0.9984573627246697,
+    "per_record_mask_iou": [
+      0.9998595505617978,
+      1.0,
+      0.9998093785741518,
+      0.9983547219480092,
+      0.9927205252640594,
+      1.0
+    ],
+    "box_baseline_records": 6,
+    "box_prompt_model_mean_iou": 0.9984573627246697,
+    "box_baseline_mean_iou": 0.8566809267647031,
+    "delta_over_box_baseline": 0.14177643595996658
+  },
+  "weight_delta_l2": 0.10881877112418228
+}
