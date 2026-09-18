@@ -64,7 +64,7 @@ weights/sam2.1-hiera-small/
 
 ## Release status
 
-**Candidate.** The corrected carrier passed all 11 cells on clean-cache Kaggle T4 kernel v6. Exact carrier, embedded-source, notebook-blob, runtime, and output identities are recorded in `docs/release-verification.md`; reviewer/integrator promotion remains separate.
+**Candidate.** Fresh clean-runtime execution is pending for the current carrier (`e82748e6c336` / notebook blob `d8824207e94e`, embedding source `9dbca8a6bf17`). The recorded 11/11-cell clean-cache Kaggle T4 v6 run belongs to a superseded carrier and remains historical evidence only. Exact identities and the rerun procedure are recorded in `docs/release-verification.md`; reviewer/integrator promotion remains separate.
 
 ## Documentation
 

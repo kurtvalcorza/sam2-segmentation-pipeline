@@ -1,6 +1,6 @@
 # Release verification
 
-`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Exact carrier commit `f7a04605efd9b4a4e333e019433089d81e0feb5b`, embedded source revision `1814d040490d11930fa2f8239a846f321717f2e2`, and notebook blob `eab8d33961db00c33d37f1c12f96d67024fe1854` passed top-to-bottom in a clean supported Kaggle T4 runtime. This satisfies the corrected execution-evidence gate but does not itself perform reviewer/integrator promotion.
+`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Current carrier commit `e82748e6c336e80f26668e919b58be0bf2d25876`, embedded source revision `9dbca8a6bf17f2b7dc11ac79cc4c6632125c32c0`, and notebook blob `d8824207e94ea59c5ed45ba7352f8106b37d42bf` have not yet run top-to-bottom in a clean supported GPU runtime. The execution-evidence gate is therefore pending. The recorded Kaggle T4 v6 pass belongs to a superseded carrier and remains historical evidence only; it does not qualify the current notebook or perform reviewer/integrator promotion.
 
 ## Automatic coverage
 
@@ -12,7 +12,7 @@ CI and the local validator must establish that:
 - the pinned pretrained baseline runs before real gradient adaptation;
 - only `mask_decoder.output_hypernetworks_mlps.0.*` is trainable, its weights move, and held-out mask IoU plus the prompt-box baseline are recorded;
 - an unseen-scene prediction is exported, the adapter uses SafeTensors with a closed digest-bound manifest, and a fresh pinned base reload reproduces the prediction;
-- the status remains Candidate until the recorded exact-blob evidence is reviewed and an integrator promotes it.
+- the status remains Candidate until the current exact blob executes successfully, that evidence is reviewed, and an integrator promotes it.
 
 ## Supported execution procedure
 
@@ -32,7 +32,7 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 | Date (UTC) | Commit / notebook blob | Executor | Path | Outcome |
 |---|---|---|---|---|
-| 2026-09-18 | `f7a04605efd9b4a4e333e019433089d81e0feb5b` / `eab8d33961db00c33d37f1c12f96d67024fe1854` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v6) | Default generated dataset | **PASS** — 11/11 cells after one expected install restart; 239.1 s; clean cache; 16 staged files / 184 MB; 36 optimizer steps; held-out IoU 0.998254 → 0.998457 versus 0.856681 prompt-box baseline; unseen IoU 1.0; reload mask exact and score within tolerance |
+| Pending | `e82748e6c336e80f26668e919b58be0bf2d25876` / `d8824207e94ea59c5ed45ba7352f8106b37d42bf` | Required: fresh supported GPU runtime | Default generated dataset | **PENDING** — current exact carrier has not yet been executed; do not reuse the superseded v6 result |
 
 ### Local E2E pre-flight (not promotion evidence)
 
@@ -48,7 +48,8 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 | 2026-09-17 | `2bc18f1f5ab6da85a037b0b9ec7ee1764f79e748` / `d7d1cb7f803e9162335a053cba36e472a86d556f` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v2) | Earlier E2E carrier | Passed 11/11 cells, 36 optimizer steps, and fresh reload, but predates review remediation; retained as workflow history only |
 | 2026-09-18 | `f17ba4834a5170f437f5015413f205dfd2f5ddd7` / `130a5d9d03f5566d080e0b82d36f1eb176056342` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v4) | Superseded E2E carrier | Passed 11/11 cells and reload, but subsequent review found transactional-state, malformed-tensor, tiny-mask, non-finite-update, fractional-box, and shape-fingerprint defects; retained as workflow history only |
 | 2026-09-18 | `dc70d19e20fd0326d807159846696a273f678660` / `f9bd4220248d89f00ca63701e3f79ac0378f4f87` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v5) | Superseded E2E carrier | Passed 11/11 cells and reload, but subsequent review found a disjoint-box acceptance gap, default serving outside the adapted mask head, missing re-freeze on reload, and stale status wording; retained as workflow history only |
+| 2026-09-18 | `f7a04605efd9b4a4e333e019433089d81e0feb5b` / `eab8d33961db00c33d37f1c12f96d67024fe1854` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v6) | Superseded E2E carrier | Passed 11/11 cells after one expected install restart in 239.1 s with clean cache, 36 optimizer steps, and exact reload, but predates the later artifact-lineage, BYOD, transactional-interruption, and metadata-schema repairs; retained as workflow history only |
 
 ## Current status
 
-The corrected E2E implementation and generated carrier remain **Candidate**, with the clean-runtime gate satisfied. The serial executor verified the Git blob, began with a clean Hugging Face cache, installed the declared pins, restarted once as designed after dependency replacement, downloaded and digest-verified the pinned base snapshot, completed all 11 code cells, and preserved the v6 output hashes under `verification/2026-09-18-kaggle-t4/`. The synthetic held-out scores are workflow evidence only and cannot establish quality improvement; promotion remains a separate reviewer/integrator decision.
+The current E2E implementation and generated carrier remain **Candidate**, with the clean-runtime gate **pending**. The v6 executor evidence and output hashes remain preserved under `verification/2026-09-18-kaggle-t4/`, but they qualify only the superseded `f7a0460` carrier. A fresh run must use the exact current carrier/blob named above and follow the supported procedure before the gate can be satisfied. Synthetic held-out scores are workflow evidence only and cannot establish quality improvement; promotion remains a separate reviewer/integrator decision.
