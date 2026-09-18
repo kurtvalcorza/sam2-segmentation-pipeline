@@ -6,7 +6,7 @@ Notebook specification: **DIMER Notebook Specification 2.0**. The notebook is a 
 
 | Notebook | Profile | Mode | Carrier | Default E2E path | Runtime | BYOD | Release status |
 |---|---|---|---|---|---|---|---|
-| `sam2_segmentation_colab.ipynb` | `E2E` | `GUIDED` | standalone (generated) | 24 deterministic labelled scenes; 18/6 train/held-out split; pinned pretrained baseline; two real gradient epochs on the first mask-token hypernetwork; held-out mask IoU and prompt-box baseline; unseen-scene prediction; SafeTensors adapter export; fresh pinned-base reload equivalence | CUDA required; Colab T4 or Kaggle T4 supported | ZIP containing paired `images/` and `masks/` files, off by default | **Candidate** — fresh exact-blob clean-runtime execution is pending for carrier `a7634b491ed1`; the recorded Kaggle T4 v6 run is historical evidence for a superseded carrier |
+| `sam2_segmentation_colab.ipynb` | `E2E` | `GUIDED` | standalone (generated) | 24 deterministic labelled scenes; 18/6 train/held-out split; pinned pretrained baseline; two real gradient epochs on the first mask-token hypernetwork; held-out mask IoU and prompt-box baseline; unseen-scene prediction; SafeTensors adapter export; fresh pinned-base reload equivalence | CUDA required; Colab T4 or Kaggle T4 supported | ZIP containing paired `images/` and `masks/` files, off by default | **Candidate** — fresh exact-blob clean-runtime execution is pending for carrier `d2fc69765370`; the recorded Kaggle T4 v6 run is historical evidence for a superseded carrier |
 
 ## Conformance notes
 

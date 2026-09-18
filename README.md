@@ -64,7 +64,7 @@ weights/sam2.1-hiera-small/
 
 ## Release status
 
-**Candidate.** Fresh clean-runtime execution is pending for the current carrier (`a7634b491ed1` / notebook blob `e89d7a07acac`, embedding source `ef8d7bafe5d9`). The recorded 11/11-cell clean-cache Kaggle T4 v6 run belongs to a superseded carrier and remains historical evidence only. Exact identities and the rerun procedure are recorded in `docs/release-verification.md`; reviewer/integrator promotion remains separate.
+**Candidate.** Fresh clean-runtime execution is pending for the current carrier (`d2fc69765370` / notebook blob `56a0f9889498`, embedding source `9f3f2210e65b`). The recorded 11/11-cell clean-cache Kaggle T4 v6 run belongs to a superseded carrier and remains historical evidence only. Exact identities and the rerun procedure are recorded in `docs/release-verification.md`; reviewer/integrator promotion remains separate.
 
 ## Documentation
 
