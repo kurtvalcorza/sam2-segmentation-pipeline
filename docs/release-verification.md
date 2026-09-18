@@ -1,6 +1,6 @@
 # Release verification
 
-`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Current carrier commit `e82748e6c336e80f26668e919b58be0bf2d25876`, embedded source revision `9dbca8a6bf17f2b7dc11ac79cc4c6632125c32c0`, and notebook blob `d8824207e94ea59c5ed45ba7352f8106b37d42bf` have not yet run top-to-bottom in a clean supported GPU runtime. The execution-evidence gate is therefore pending. The recorded Kaggle T4 v6 pass belongs to a superseded carrier and remains historical evidence only; it does not qualify the current notebook or perform reviewer/integrator promotion.
+`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Current carrier commit `a7634b491ed1a58616e9f5fc3aad1bdc7cae556a`, embedded source revision `ef8d7bafe5d977a52d4eb9384f7ba846e3b438d0`, and notebook blob `e89d7a07acac03ed57599ce1c91608234c4ada9a` have not yet run top-to-bottom in a clean supported GPU runtime. The execution-evidence gate is therefore pending. The recorded Kaggle T4 v6 pass belongs to a superseded carrier and remains historical evidence only; it does not qualify the current notebook or perform reviewer/integrator promotion.
 
 ## Automatic coverage
 
@@ -32,7 +32,7 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 | Date (UTC) | Commit / notebook blob | Executor | Path | Outcome |
 |---|---|---|---|---|
-| Pending | `e82748e6c336e80f26668e919b58be0bf2d25876` / `d8824207e94ea59c5ed45ba7352f8106b37d42bf` | Required: fresh supported GPU runtime | Default generated dataset | **PENDING** — current exact carrier has not yet been executed; do not reuse the superseded v6 result |
+| Pending | `a7634b491ed1a58616e9f5fc3aad1bdc7cae556a` / `e89d7a07acac03ed57599ce1c91608234c4ada9a` | Required: fresh supported GPU runtime | Default generated dataset | **PENDING** — current exact carrier has not yet been executed; do not reuse the superseded v6 result |
 
 ### Local E2E pre-flight (not promotion evidence)
 
