@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -374,6 +375,13 @@ def validate_segmentation_dataset(records: Sequence[Mapping[str, Any]]) -> dict[
                     )
         positive_pixels += area
         digest.update(record_id.encode("utf-8"))
+        digest.update(
+            json.dumps(
+                {"image_shape": [image.height, image.width, 3], "mask_shape": list(mask.shape)},
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
         digest.update(np.asarray(image, dtype=np.uint8).tobytes())
         digest.update(mask.tobytes())
         digest.update(
@@ -396,9 +404,17 @@ def validate_segmentation_dataset(records: Sequence[Mapping[str, Any]]) -> dict[
 def _segmentation_record_content_sha256(record: Mapping[str, Any]) -> str:
     """Fingerprint one validated image/mask sample without its ID or mutable prompts."""
     image = validate_image(record["image"])
+    mask = np.asarray(record["mask"], dtype=np.bool_)
     digest = hashlib.sha256()
+    digest.update(
+        json.dumps(
+            {"image_shape": [image.height, image.width, 3], "mask_shape": list(mask.shape)},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
     digest.update(np.asarray(image, dtype=np.uint8).tobytes())
-    digest.update(np.asarray(record["mask"], dtype=np.bool_).tobytes())
+    digest.update(mask.tobytes())
     return digest.hexdigest()
 
 
@@ -601,63 +617,99 @@ class SAM2SegmentationPipeline:
 
         history: list[dict[str, Any]] = []
         baseline_val_iou = score(cached_val) if cached_val else None
-        for epoch in range(1, epochs + 1):
-            order = list(range(len(cached_train)))
-            random.Random(seed + epoch * 17).shuffle(order)
-            total_loss = 0.0
-            for index in order:
-                embeddings, prompts, target, _original_size = cached_train[index]
-                device_embeddings = [item.to(device) for item in embeddings]
-                device_prompts = {key: value.to(device) for key, value in prompts.items()}
-                device_target = target.to(device)
-                optimizer.zero_grad(set_to_none=True)
-                logits = self.model(
-                    image_embeddings=device_embeddings,
-                    multimask_output=False,
-                    **device_prompts,
-                ).pred_masks[0, 0, 0]
-                target_low = F.interpolate(
-                    device_target[None, None], size=logits.shape, mode="nearest"
-                )[0, 0]
-                probabilities = logits.sigmoid()
-                bce = F.binary_cross_entropy_with_logits(logits, target_low)
-                dice = 1.0 - (2.0 * (probabilities * target_low).sum() + 1.0) / (
-                    probabilities.sum() + target_low.sum() + 1.0
-                )
-                loss = bce + dice
-                loss.backward()
-                optimizer.step()
-                total_loss += float(loss.item())
-            epoch_data: dict[str, Any] = {
-                "epoch": epoch,
-                "train_loss": round(total_loss / len(cached_train), 6),
-                "optimizer_steps": len(cached_train),
-            }
-            if cached_val:
-                epoch_data["val_mask_iou"] = round(score(cached_val), 6)
-            history.append(epoch_data)
+        previous_config = dict(self.adaptation_config)
+        for key in (
+            "epochs",
+            "learning_rate",
+            "batch_size",
+            "seed",
+            "loss",
+            "train_manifest",
+            "validation_manifest",
+            "baseline_validation_mask_iou",
+            "history",
+            "weight_delta_l2",
+        ):
+            self.adaptation_config.pop(key, None)
+        try:
+            for epoch in range(1, epochs + 1):
+                order = list(range(len(cached_train)))
+                random.Random(seed + epoch * 17).shuffle(order)
+                total_loss = 0.0
+                for index in order:
+                    embeddings, prompts, target, _original_size = cached_train[index]
+                    device_embeddings = [item.to(device) for item in embeddings]
+                    device_prompts = {key: value.to(device) for key, value in prompts.items()}
+                    device_target = target.to(device)
+                    optimizer.zero_grad(set_to_none=True)
+                    logits = self.model(
+                        image_embeddings=device_embeddings,
+                        multimask_output=False,
+                        **device_prompts,
+                    ).pred_masks[0, 0, 0]
+                    target_low = (
+                        F.interpolate(
+                            device_target[None, None], size=logits.shape, mode="area"
+                        )[0, 0]
+                        > 0
+                    ).to(logits.dtype)
+                    probabilities = logits.sigmoid()
+                    bce = F.binary_cross_entropy_with_logits(logits, target_low)
+                    dice = 1.0 - (2.0 * (probabilities * target_low).sum() + 1.0) / (
+                        probabilities.sum() + target_low.sum() + 1.0
+                    )
+                    loss = bce + dice
+                    if not bool(torch.isfinite(loss)):
+                        raise RuntimeError("fine-tuning produced a non-finite loss")
+                    loss.backward()
+                    optimizer.step()
+                    if any(
+                        not bool(torch.isfinite(parameter).all())
+                        for parameter in trainable.values()
+                    ):
+                        raise RuntimeError("fine-tuning produced non-finite adapter weights")
+                    total_loss += float(loss.item())
+                epoch_data: dict[str, Any] = {
+                    "epoch": epoch,
+                    "train_loss": round(total_loss / len(cached_train), 6),
+                    "optimizer_steps": len(cached_train),
+                }
+                if cached_val:
+                    epoch_data["val_mask_iou"] = round(score(cached_val), 6)
+                history.append(epoch_data)
 
-        delta_sq = 0.0
-        for name, parameter in trainable.items():
-            delta_sq += float(torch.sum((parameter.detach().cpu() - before[name]) ** 2).item())
-        weight_delta_l2 = delta_sq**0.5
-        if weight_delta_l2 == 0.0:
-            raise RuntimeError("fine-tuning completed without changing adapter weights")
-        self.model.eval()
-        self.adaptation_config.update(
-            {
-                "epochs": epochs,
-                "learning_rate": float(learning_rate),
-                "batch_size": 1,
-                "seed": seed,
-                "loss": "binary-cross-entropy-plus-soft-dice",
-                "train_manifest": train_manifest,
-                "validation_manifest": val_manifest,
-                "baseline_validation_mask_iou": baseline_val_iou,
-                "history": history,
-                "weight_delta_l2": weight_delta_l2,
-            }
-        )
+            delta_sq = 0.0
+            for name, parameter in trainable.items():
+                delta_sq += float(
+                    torch.sum((parameter.detach().cpu() - before[name]) ** 2).item()
+                )
+            weight_delta_l2 = delta_sq**0.5
+            if not math.isfinite(weight_delta_l2):
+                raise RuntimeError("fine-tuning produced a non-finite weight delta")
+            if weight_delta_l2 == 0.0:
+                raise RuntimeError("fine-tuning completed without changing adapter weights")
+            self.model.eval()
+            self.adaptation_config.update(
+                {
+                    "epochs": epochs,
+                    "learning_rate": float(learning_rate),
+                    "batch_size": 1,
+                    "seed": seed,
+                    "loss": "binary-cross-entropy-plus-soft-dice",
+                    "train_manifest": train_manifest,
+                    "validation_manifest": val_manifest,
+                    "baseline_validation_mask_iou": baseline_val_iou,
+                    "history": history,
+                    "weight_delta_l2": weight_delta_l2,
+                }
+            )
+        except Exception:
+            with torch.no_grad():
+                for name, parameter in trainable.items():
+                    parameter.copy_(before[name].to(device=parameter.device, dtype=parameter.dtype))
+            self.adaptation_config = previous_config
+            self.model.eval()
+            raise
         return history
 
     def evaluate_adaptation(self, records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -680,7 +732,8 @@ class SAM2SegmentationPipeline:
             box = record.get("box")
             if box is not None:
                 baseline = np.zeros_like(target)
-                x0, y0, x1, y1 = (int(round(value)) for value in box)
+                x0, y0 = (math.floor(float(value)) for value in box[:2])
+                x1, y1 = (math.ceil(float(value)) for value in box[2:])
                 baseline[y0:y1, x0:x1] = True
                 box_ious.append(mask_iou(baseline, target))
                 box_model_ious.append(model_iou)
@@ -710,6 +763,7 @@ class SAM2SegmentationPipeline:
             self.model is None
             or not isinstance(weight_delta, int | float)
             or isinstance(weight_delta, bool)
+            or not math.isfinite(float(weight_delta))
             or weight_delta <= 0
             or not isinstance(history, list)
             or not history
@@ -802,6 +856,16 @@ class SAM2SegmentationPipeline:
         }
         if set(state) != expected:
             raise ValueError("artifact tensor inventory does not match the declared adapter surface")
+        destination = self.model.state_dict()
+        for name, tensor in state.items():
+            expected_tensor = destination[name]
+            if tensor.shape != expected_tensor.shape or tensor.dtype != expected_tensor.dtype:
+                raise ValueError(
+                    f"artifact tensor {name} has shape/dtype {tuple(tensor.shape)}/{tensor.dtype}; "
+                    f"expected {tuple(expected_tensor.shape)}/{expected_tensor.dtype}"
+                )
+            if not bool(tensor.isfinite().all()):
+                raise ValueError(f"artifact tensor {name} contains non-finite values")
         self.model.load_state_dict(state, strict=False)
         self.model.to(self.device).eval()
         self.adaptation_config = dict(adaptation)

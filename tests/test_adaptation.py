@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -7,11 +8,13 @@ import numpy as np
 import pytest
 import torch
 from PIL import Image
+from safetensors.torch import load_file, save_file
 
 from sam2_segmentation_pipeline.pipeline import (
     ARTIFACT_MANIFEST_NAME,
     ARTIFACT_WEIGHTS_NAME,
     SAM2SegmentationPipeline,
+    _segmentation_record_content_sha256,
     validate_segmentation_dataset,
 )
 
@@ -117,6 +120,33 @@ def test_dataset_fingerprint_includes_prompts():
     assert changed != original
 
 
+def test_content_fingerprint_includes_image_and_mask_dimensions():
+    pixels = np.arange(16 * 32 * 3, dtype=np.uint8)
+    mask_values = np.arange(16 * 32) % 2 == 0
+    wide = {
+        "id": "wide",
+        "image": Image.fromarray(pixels.reshape(16, 32, 3)),
+        "mask": mask_values.reshape(16, 32),
+        "points": [[0.0, 0.0]],
+        "point_labels": [1],
+    }
+    tall = {
+        "id": "tall",
+        "image": Image.fromarray(pixels.reshape(32, 16, 3)),
+        "mask": mask_values.reshape(32, 16),
+        "points": [[0.0, 0.0]],
+        "point_labels": [1],
+    }
+    assert _segmentation_record_content_sha256(wide) != _segmentation_record_content_sha256(
+        tall
+    )
+    assert validate_segmentation_dataset([wide, dict(wide, id="wide-2")])[
+        "dataset_sha256"
+    ] != (
+        validate_segmentation_dataset([tall, dict(tall, id="tall-2")])["dataset_sha256"]
+    )
+
+
 def test_finetune_updates_only_declared_adapter_surface():
     pipeline = _pipeline()
     counts = pipeline.freeze_for_adaptation()
@@ -128,6 +158,59 @@ def test_finetune_updates_only_declared_adapter_surface():
     assert history[0]["optimizer_steps"] == 2
     assert not torch.equal(before, after)
     assert pipeline.adaptation_config["weight_delta_l2"] > 0
+
+
+def test_finetune_preserves_a_single_pixel_foreground_when_downsampling(monkeypatch):
+    mask = np.zeros((16, 16), dtype=np.bool_)
+    mask[1, 1] = True
+    record = {
+        "id": "single-pixel",
+        "image": Image.new("RGB", (16, 16), (20, 40, 80)),
+        "mask": mask,
+        "points": [[1.0, 1.0]],
+        "point_labels": [1],
+        "box": [1.0, 1.0, 2.0, 2.0],
+    }
+    observed_targets = []
+    original_bce = torch.nn.functional.binary_cross_entropy_with_logits
+
+    def capture_target(logits, target, *args, **kwargs):
+        observed_targets.append(target.detach().clone())
+        return original_bce(logits, target, *args, **kwargs)
+
+    monkeypatch.setattr(
+        torch.nn.functional, "binary_cross_entropy_with_logits", capture_target
+    )
+    pipeline = _pipeline()
+    pipeline.freeze_for_adaptation()
+    pipeline.finetune([record, dict(record, id="single-pixel-2")], epochs=1, learning_rate=1e-2)
+    assert observed_targets
+    assert all(float(target.sum()) >= 1.0 for target in observed_targets)
+
+
+def test_failed_retraining_restores_weights_and_completion_metadata(monkeypatch):
+    pipeline = _pipeline()
+    pipeline.freeze_for_adaptation()
+    pipeline.adaptation_config.update({"weight_delta_l2": 1.0, "history": [{"epoch": 1}]})
+    previous_config = dict(pipeline.adaptation_config)
+    before = {
+        name: parameter.detach().clone()
+        for name, parameter in pipeline.model.named_parameters()
+        if parameter.requires_grad
+    }
+    original_forward = pipeline.model.forward
+
+    def non_finite_forward(*args, **kwargs):
+        outputs = original_forward(*args, **kwargs)
+        return SimpleNamespace(pred_masks=outputs.pred_masks * float("nan"))
+
+    monkeypatch.setattr(pipeline.model, "forward", non_finite_forward)
+    with pytest.raises(RuntimeError, match="non-finite loss"):
+        pipeline.finetune(_records()[:2], epochs=1, learning_rate=1e-2)
+    assert pipeline.adaptation_config == previous_config
+    for name, parameter in pipeline.model.named_parameters():
+        if name in before:
+            assert torch.equal(parameter, before[name])
 
 
 def test_finetune_rejects_train_validation_overlap_by_id_or_content():
@@ -177,6 +260,23 @@ def test_mixed_prompt_baseline_uses_only_box_records_for_delta():
     )
 
 
+def test_fractional_box_baseline_covers_a_nonempty_pixel_region():
+    record = _records()[0]
+    mask = np.zeros((16, 16), dtype=np.bool_)
+    mask[0, 0] = True
+    record = dict(
+        record,
+        mask=mask,
+        points=[[0.0, 0.0]],
+        box=[0.1, 0.1, 0.4, 0.4],
+    )
+    pipeline = _pipeline()
+    pipeline._runner = lambda *_args: (mask[None], [0.0])
+    report = pipeline.evaluate_adaptation([record, dict(record, id="shape-fractional-2")])
+    assert report["box_baseline_mean_iou"] == 1.0
+    assert report["delta_over_box_baseline"] == 0.0
+
+
 def test_artifact_round_trip_and_integrity_rejection(tmp_path):
     source = _pipeline()
     source.freeze_for_adaptation()
@@ -218,3 +318,35 @@ def test_artifact_round_trip_and_integrity_rejection(tmp_path):
     with pytest.raises(ValueError, match="SHA-256"):
         _pipeline().load_artifact(artifact)
     assert (artifact / ARTIFACT_WEIGHTS_NAME).is_file()
+
+    malformed = source.save_artifact(tmp_path / "malformed", producer_revision="b" * 40)
+    malformed_weights = malformed / ARTIFACT_WEIGHTS_NAME
+    malformed_state = load_file(str(malformed_weights))
+    tensor_name = next(name for name, tensor in malformed_state.items() if tensor.ndim > 1)
+    malformed_state[tensor_name] = malformed_state[tensor_name].reshape(-1)
+    save_file(malformed_state, str(malformed_weights))
+    malformed_manifest_path = malformed / ARTIFACT_MANIFEST_NAME
+    malformed_manifest = json.loads(malformed_manifest_path.read_text(encoding="utf-8"))
+    malformed_manifest["files"][0]["bytes"] = malformed_weights.stat().st_size
+    malformed_manifest["files"][0]["sha256"] = hashlib.sha256(
+        malformed_weights.read_bytes()
+    ).hexdigest()
+    malformed_manifest_path.write_text(json.dumps(malformed_manifest), encoding="utf-8")
+    rejected_shape = _pipeline()
+    before_shape = {
+        name: tensor.detach().clone() for name, tensor in rejected_shape.model.state_dict().items()
+    }
+    with pytest.raises(ValueError, match="shape/dtype"):
+        rejected_shape.load_artifact(malformed)
+    for name, tensor in rejected_shape.model.state_dict().items():
+        assert torch.equal(tensor, before_shape[name])
+
+
+def test_artifact_export_rejects_non_finite_completion_metadata(tmp_path):
+    pipeline = _pipeline()
+    pipeline.freeze_for_adaptation()
+    pipeline.adaptation_config.update(
+        {"weight_delta_l2": float("nan"), "history": [{"epoch": 1}]}
+    )
+    with pytest.raises(RuntimeError, match="completed fine-tuning"):
+        pipeline.save_artifact(tmp_path / "artifact", producer_revision="a" * 40)

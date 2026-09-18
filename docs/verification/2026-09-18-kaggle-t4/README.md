@@ -13,7 +13,8 @@ This directory retains the serial-suite evidence for the standalone SAM2 bounded
 
 ## Result
 
-- Outcome: **PASS**
+- Executor outcome: **PASS**
+- Qualification outcome: **REJECTED** — subsequent review found six defects; this v4 bundle is retained as historical evidence and does not qualify the corrected carrier.
 - Runtime: Python 3.12.13, PyTorch 2.14.0+cu130, Transformers 4.57.6, Tesla T4 15,360 MiB
 - Fresh Hugging Face cache: yes
 - Wall time: 226.7 seconds
