@@ -65,7 +65,7 @@ The upstream training masks were produced by a model-in-the-loop annotation engi
 
 ###### Environment
 
-The declared notebook environment is Python 3.12 with `torch==2.14.0`, `transformers==4.57.6`, and the exact pins in `pyproject.toml`. Historical inference timings were measured on CPU. The current E2E carrier also completed a local CUDA pre-flight on an RTX 5070 Ti Laptop GPU, but that run used Python 3.14.2, torch 2.11.0+cu128, and transformers 5.8.1, so it is compatibility evidence rather than release qualification. Model cost is dominated by the fixed 1024x1024 working resolution, while the caller's resolution mostly sets the size of up-sampled masks. The model assumes an ordinary photograph with a visible prompted boundary; low contrast, transparency, thin structures, and heavy occlusion can still produce masks that bleed or fragment.
+The declared notebook environment is Python 3.12 with `torch==2.14.0`, `transformers==4.57.6`, and the exact pins in `pyproject.toml`. Exact blob `d7d1cb7f803e` completed clean-room execution on Kaggle Python 3.12.13 with PyTorch 2.14.0+cu130 and a Tesla T4; the full evidence is recorded under `docs/verification/2026-09-18-kaggle-t4/`. Model cost is dominated by the fixed 1024x1024 working resolution, while the caller's resolution mostly sets the size of up-sampled masks. The model assumes an ordinary photograph with a visible prompted boundary; low contrast, transparency, thin structures, and heavy occlusion can still produce masks that bleed or fragment.
 
 #### Metrics
 

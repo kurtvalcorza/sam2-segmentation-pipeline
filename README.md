@@ -63,7 +63,7 @@ weights/sam2.1-hiera-small/
 
 ## Release status
 
-**Candidate.** The E2E source, unit tests, and an 11/11-cell local CUDA pre-flight pass are not clean-runtime notebook evidence. A supported-runtime `Run all` against the exact committed notebook blob is still required before promotion.
+**Candidate.** Exact commit `2bc18f1` and notebook blob `d7d1cb7f803e` passed an 11/11-cell clean Kaggle T4 `Run all`. The clean-runtime gate is recorded in `docs/release-verification.md`; status remains Candidate until reviewer/integrator promotion.
 
 ## Documentation
 

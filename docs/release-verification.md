@@ -1,6 +1,6 @@
 # Release verification
 
-`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Static validation, unit tests, and the local full-carrier pre-flight do not satisfy the runtime gate. Promotion requires the exact committed notebook blob to execute top-to-bottom in a clean supported CUDA runtime.
+`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Exact commit `2bc18f1f5ab6da85a037b0b9ec7ee1764f79e748` and notebook blob `d7d1cb7f803e9162335a053cba36e472a86d556f` passed top-to-bottom in a clean supported Kaggle T4 runtime. This satisfies the execution-evidence gate but does not itself perform reviewer/integrator promotion.
 
 ## Automatic coverage
 
@@ -12,7 +12,7 @@ CI and the local validator must establish that:
 - the pinned pretrained baseline runs before real gradient adaptation;
 - only `mask_decoder.output_hypernetworks_mlps.0.*` is trainable, its weights move, and held-out mask IoU plus the prompt-box baseline are recorded;
 - an unseen-scene prediction is exported, the adapter uses SafeTensors with a closed digest-bound manifest, and a fresh pinned base reload reproduces the prediction;
-- the status remains Candidate until supported-runtime evidence for the exact blob exists.
+- the status remains Candidate until the recorded exact-blob evidence is reviewed and an integrator promotes it.
 
 ## Supported execution procedure
 
@@ -32,7 +32,7 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 | Date (UTC) | Commit / notebook blob | Executor | Path | Outcome |
 |---|---|---|---|---|
-| Pending | Not committed | Colab or Kaggle CUDA | Default generated dataset | Candidate gate open; no exact-blob supported-runtime execution yet |
+| 2026-09-17 | `2bc18f1f5ab6da85a037b0b9ec7ee1764f79e748` / `d7d1cb7f803e9162335a053cba36e472a86d556f` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v2) | Default generated dataset | **PASS** — 11/11 cells after one expected install restart; 229.9 s; clean cache; 16 staged files / 184 MB; 36 optimizer steps; held-out IoU 0.998254 → 0.998457; unseen IoU 1.0; SafeTensors fresh-base reload passed |
 
 ### Local E2E pre-flight (not promotion evidence)
 
@@ -48,4 +48,4 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 ## Current status
 
-The E2E implementation and generated carrier remain **Candidate**. The complete generated carrier passed locally on CUDA, but its interpreter differs from the declared pins and the current uncommitted notebook has no immutable blob identity. It therefore cannot receive qualifying clean-runtime evidence yet.
+The E2E implementation and generated carrier remain **Candidate**, with the clean-runtime gate satisfied. The serial executor verified the Git blob before execution, began with a clean Hugging Face cache, installed the declared pins, restarted once as designed after dependency replacement, downloaded and digest-verified the pinned base snapshot, completed all 11 code cells, and preserved the output hashes under `verification/2026-09-18-kaggle-t4/`. Promotion remains a separate reviewer/integrator decision.
