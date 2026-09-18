@@ -95,6 +95,24 @@ def _pipeline(model=None) -> SAM2SegmentationPipeline:
     )
 
 
+def _mark_completed(pipeline: SAM2SegmentationPipeline, *, weight_delta_l2: float = 1.0) -> None:
+    records = _records()
+    pipeline.adaptation_config.update(
+        {
+            "epochs": 1,
+            "learning_rate": 1e-2,
+            "batch_size": 1,
+            "seed": 42,
+            "loss": "binary-cross-entropy-plus-soft-dice",
+            "train_manifest": validate_segmentation_dataset(records[:2]),
+            "validation_manifest": validate_segmentation_dataset(records[2:]),
+            "baseline_validation_mask_iou": 0.25,
+            "history": [{"epoch": 1, "train_loss": 0.5, "optimizer_steps": 2}],
+            "weight_delta_l2": weight_delta_l2,
+        }
+    )
+
+
 def test_dataset_validation_rejects_duplicate_ids_and_non_boolean_masks():
     records = _records()
     assert validate_segmentation_dataset(records)["records"] == 4
@@ -287,7 +305,7 @@ def test_fractional_box_baseline_covers_a_nonempty_pixel_region():
 def test_artifact_round_trip_and_integrity_rejection(tmp_path):
     source = _pipeline()
     source.freeze_for_adaptation()
-    source.adaptation_config.update({"weight_delta_l2": 1.0, "history": [{"epoch": 1}]})
+    _mark_completed(source)
     artifact = source.save_artifact(tmp_path / "artifact", producer_revision="a" * 40)
 
     fresh = _pipeline()
@@ -330,6 +348,53 @@ def test_artifact_round_trip_and_integrity_rejection(tmp_path):
     after_empty = rejected_empty.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
     assert torch.equal(before_empty, after_empty)
 
+    manifest["adaptation"] = dict(source.adaptation_config, artifact_lineage=None)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    rejected_null_lineage = _pipeline()
+    before_null_lineage = (
+        rejected_null_lineage.model.mask_decoder.output_hypernetworks_mlps[0]
+        .weight.detach()
+        .clone()
+    )
+    with pytest.raises(ValueError, match="artifact_lineage"):
+        rejected_null_lineage.load_artifact(artifact)
+    after_null_lineage = (
+        rejected_null_lineage.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
+    )
+    assert torch.equal(before_null_lineage, after_null_lineage)
+
+    stale_adaptation = json.loads(json.dumps(source.adaptation_config))
+    run_fields = {
+        "epochs",
+        "learning_rate",
+        "batch_size",
+        "seed",
+        "loss",
+        "train_manifest",
+        "validation_manifest",
+        "baseline_validation_mask_iou",
+        "history",
+        "weight_delta_l2",
+    }
+    stale_adaptation["training_runs"] = [
+        {key: value for key, value in stale_adaptation.items() if key in run_fields}
+    ]
+    stale_adaptation["weight_delta_l2"] = 2.0
+    manifest["adaptation"] = stale_adaptation
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    rejected_stale_lineage = _pipeline()
+    before_stale_lineage = (
+        rejected_stale_lineage.model.mask_decoder.output_hypernetworks_mlps[0]
+        .weight.detach()
+        .clone()
+    )
+    with pytest.raises(ValueError, match="latest training run"):
+        rejected_stale_lineage.load_artifact(artifact)
+    after_stale_lineage = (
+        rejected_stale_lineage.model.mask_decoder.output_hypernetworks_mlps[0].weight.detach()
+    )
+    assert torch.equal(before_stale_lineage, after_stale_lineage)
+
     manifest["adaptation"] = source.adaptation_config
     manifest["files"][0]["sha256"] = "0" * 64
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -363,13 +428,17 @@ def test_artifact_round_trip_and_integrity_rejection(tmp_path):
 def test_loaded_artifact_refreezes_base_and_supports_continued_finetuning(tmp_path):
     source = _pipeline()
     source.freeze_for_adaptation()
-    source.adaptation_config.update({"weight_delta_l2": 1.0, "history": [{"epoch": 1}]})
+    _mark_completed(source)
     artifact = source.save_artifact(tmp_path / "artifact", producer_revision="c" * 40)
 
     loaded = _pipeline()
     loaded.load_artifact(artifact)
     assert loaded.model.backbone.weight.requires_grad is False
     assert loaded.model.mask_decoder.output_hypernetworks_mlps[0].weight.requires_grad is True
+
+    loaded_metadata = json.loads(json.dumps(loaded.adaptation_config))
+    loaded.freeze_for_adaptation()
+    assert loaded.adaptation_config == loaded_metadata
 
     history = loaded.finetune(_records()[:2], _records()[2:], epochs=1, learning_rate=1e-2)
     assert history[0]["optimizer_steps"] == 2
@@ -416,8 +485,6 @@ def test_adapted_segment_defaults_to_single_mask_and_rejects_multimask():
 def test_artifact_export_rejects_non_finite_completion_metadata(tmp_path):
     pipeline = _pipeline()
     pipeline.freeze_for_adaptation()
-    pipeline.adaptation_config.update(
-        {"weight_delta_l2": float("nan"), "history": [{"epoch": 1}]}
-    )
+    _mark_completed(pipeline, weight_delta_l2=float("nan"))
     with pytest.raises(RuntimeError, match="completed fine-tuning"):
         pipeline.save_artifact(tmp_path / "artifact", producer_revision="a" * 40)

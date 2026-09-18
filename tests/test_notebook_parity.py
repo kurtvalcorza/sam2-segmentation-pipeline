@@ -142,3 +142,21 @@ def test_byod_supports_an_attached_kaggle_zip_without_colab(notebook: dict, tmp_
     assert namespace["dataset_kind"] == "BYOD"
     assert len(namespace["train_records"]) == 6
     assert len(namespace["val_records"]) == 2
+
+    oversized_path = tmp_path / "oversized.zip"
+    oversized_path.write_bytes(b"x" * 33)
+    oversized_code = next(
+        _source(cell)
+        for cell in _cells(notebook, "code")
+        if "def load_byod_zip" in _source(cell)
+    )
+    oversized_code = (
+        oversized_code.replace("USE_BYOD = False", "USE_BYOD = True", 1)
+        .replace("BYOD_ZIP_PATH = ''", f"BYOD_ZIP_PATH = {str(oversized_path)!r}", 1)
+        .replace("BYOD_ZIP_MAX_BYTES = 256 * 1024 * 1024", "BYOD_ZIP_MAX_BYTES = 32", 1)
+    )
+    with pytest.raises(ValueError, match="BYOD ZIP exceeds"):
+        exec(
+            compile(oversized_code, "<notebook-oversized-byod-cell>", "exec"),
+            {"MIN_IMAGE_SIDE": 16, "MAX_IMAGE_SIDE": 4096},
+        )

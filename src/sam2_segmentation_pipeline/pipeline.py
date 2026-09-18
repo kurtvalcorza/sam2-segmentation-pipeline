@@ -66,6 +66,47 @@ def _is_positive_finite_number(value: Any) -> bool:
     )
 
 
+def _validate_adaptation_run(run: Any, *, label: str) -> None:
+    if not isinstance(run, Mapping):
+        raise ValueError(f"{label} must be a mapping")
+    missing = [key for key in _ADAPTATION_RUN_FIELDS if key not in run]
+    if missing:
+        raise ValueError(f"{label} is missing required fields: {missing}")
+    epochs = run["epochs"]
+    batch_size = run["batch_size"]
+    seed = run["seed"]
+    if not isinstance(epochs, int) or isinstance(epochs, bool) or epochs <= 0:
+        raise ValueError(f"{label} has invalid epochs")
+    if not _is_positive_finite_number(run["learning_rate"]):
+        raise ValueError(f"{label} has invalid learning rate")
+    if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
+        raise ValueError(f"{label} has invalid batch size")
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError(f"{label} has invalid seed")
+    if run["loss"] != "binary-cross-entropy-plus-soft-dice":
+        raise ValueError(f"{label} has an unsupported loss")
+    if not isinstance(run["train_manifest"], Mapping):
+        raise ValueError(f"{label} has invalid train manifest")
+    if run["validation_manifest"] is not None and not isinstance(
+        run["validation_manifest"], Mapping
+    ):
+        raise ValueError(f"{label} has invalid validation manifest")
+    baseline = run["baseline_validation_mask_iou"]
+    if baseline is not None and (
+        not isinstance(baseline, int | float)
+        or isinstance(baseline, bool)
+        or not math.isfinite(float(baseline))
+    ):
+        raise ValueError(f"{label} has invalid validation baseline")
+    history = run["history"]
+    if not isinstance(history, list) or not history or not all(
+        isinstance(item, Mapping) for item in history
+    ):
+        raise ValueError(f"{label} requires non-empty training history")
+    if not _is_positive_finite_number(run["weight_delta_l2"]):
+        raise ValueError(f"{label} requires a positive finite weight delta")
+
+
 def _validate_completed_adaptation_metadata(adaptation: Any) -> None:
     """Reject metadata that cannot identify a completed adapter before weights are applied."""
     if not isinstance(adaptation, Mapping):
@@ -80,29 +121,21 @@ def _validate_completed_adaptation_metadata(adaptation: Any) -> None:
         raise ValueError("artifact adaptation metadata has invalid trainable parameter count")
     if not isinstance(frozen, int) or isinstance(frozen, bool) or frozen < 0:
         raise ValueError("artifact adaptation metadata has invalid frozen parameter count")
-    if not _is_positive_finite_number(adaptation.get("weight_delta_l2")):
-        raise ValueError("artifact adaptation metadata requires a positive finite weight delta")
-    history = adaptation.get("history")
-    if not isinstance(history, list) or not history or not all(isinstance(item, Mapping) for item in history):
-        raise ValueError("artifact adaptation metadata requires non-empty training history")
-    training_runs = adaptation.get("training_runs")
-    if training_runs is not None:
+    _validate_adaptation_run(adaptation, label="artifact adaptation metadata current run")
+    if "training_runs" in adaptation:
+        training_runs = adaptation["training_runs"]
         if not isinstance(training_runs, list) or not training_runs:
             raise ValueError("artifact adaptation metadata training_runs must be a non-empty list")
-        for run in training_runs:
-            if not isinstance(run, Mapping):
-                raise ValueError("artifact adaptation metadata training_runs entries must be mappings")
-            run_history = run.get("history")
-            if not _is_positive_finite_number(run.get("weight_delta_l2")) or not isinstance(
-                run_history, list
-            ) or not run_history:
-                raise ValueError("artifact adaptation metadata contains an incomplete training run")
-    artifact_lineage = adaptation.get("artifact_lineage")
-    if artifact_lineage is not None and (
-        not isinstance(artifact_lineage, list)
-        or not all(isinstance(item, Mapping) for item in artifact_lineage)
-    ):
-        raise ValueError("artifact adaptation metadata artifact_lineage must be a list of mappings")
+        for index, run in enumerate(training_runs):
+            _validate_adaptation_run(run, label=f"artifact adaptation metadata training_runs[{index}]")
+        if training_runs[-1] != _adaptation_run_snapshot(adaptation):
+            raise ValueError("artifact adaptation metadata latest training run does not match current run")
+    if "artifact_lineage" in adaptation:
+        artifact_lineage = adaptation["artifact_lineage"]
+        if not isinstance(artifact_lineage, list) or not all(
+            isinstance(item, Mapping) for item in artifact_lineage
+        ):
+            raise ValueError("artifact adaptation metadata artifact_lineage must be a list of mappings")
 
 
 def _adaptation_run_snapshot(adaptation: Mapping[str, Any]) -> dict[str, Any]:
@@ -561,6 +594,7 @@ class SAM2SegmentationPipeline:
         """Freeze the base model and enable the first mask-token hypernetwork only."""
         if self.model is None:
             raise RuntimeError("cannot configure adaptation without an underlying torch model")
+        previous_config = dict(self.adaptation_config)
         trainable = frozen = 0
         for name, parameter in self.model.named_parameters():
             parameter.requires_grad = name.startswith(TRAINABLE_PREFIXES)
@@ -570,12 +604,18 @@ class SAM2SegmentationPipeline:
                 frozen += parameter.numel()
         if trainable == 0:
             raise RuntimeError("SAM2 adaptation selected no trainable parameters")
-        self.adaptation_config = {
+        base_config = {
             "method": ADAPTATION_METHOD,
             "trainable_prefixes": list(TRAINABLE_PREFIXES),
             "trainable_parameters": trainable,
             "frozen_parameters": frozen,
         }
+        if any(key in previous_config for key in _ADAPTATION_RUN_FIELDS):
+            _validate_completed_adaptation_metadata(previous_config)
+            previous_config.update(base_config)
+            self.adaptation_config = previous_config
+        else:
+            self.adaptation_config = base_config
         return {"trainable_parameters": trainable, "frozen_parameters": frozen}
 
     def finetune(
