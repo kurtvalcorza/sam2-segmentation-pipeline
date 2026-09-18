@@ -1,6 +1,6 @@
 # Release verification
 
-`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Current carrier commit `d2fc69765370077bae1a4f7663e0b2b9195e3ec3`, embedded source revision `9f3f2210e65b845f76e6a12abb176f598dc8712d`, and notebook blob `56a0f9889498b53787d2bd936d209d82c02e0944` have not yet run top-to-bottom in a clean supported GPU runtime. The execution-evidence gate is therefore pending. The recorded Kaggle T4 v6 pass belongs to a superseded carrier and remains historical evidence only; it does not qualify the current notebook or perform reviewer/integrator promotion.
+`tutorials/sam2_segmentation_colab.ipynb` is an `E2E`, standalone Candidate carrier under DIMER Notebook Specification 2.0. Current carrier commit `d2fc69765370077bae1a4f7663e0b2b9195e3ec3`, embedded source revision `9f3f2210e65b845f76e6a12abb176f598dc8712d`, and notebook blob `56a0f9889498b53787d2bd936d209d82c02e0944` passed top-to-bottom in a clean-cache Kaggle Tesla T4 v7 runtime. The exact-carrier execution-evidence gate is satisfied; Release-grade promotion remains a separate decision.
 
 ## Automatic coverage
 
@@ -32,7 +32,7 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 | Date (UTC) | Commit / notebook blob | Executor | Path | Outcome |
 |---|---|---|---|---|
-| Pending | `d2fc69765370077bae1a4f7663e0b2b9195e3ec3` / `56a0f9889498b53787d2bd936d209d82c02e0944` | Required: fresh supported GPU runtime | Default generated dataset | **PENDING** — current exact carrier has not yet been executed; do not reuse the superseded v6 result |
+| 2026-09-18 | `d2fc69765370077bae1a4f7663e0b2b9195e3ec3` / `56a0f9889498b53787d2bd936d209d82c02e0944` | Kaggle T4 (`kurtvalcorza/dimer-nb2-sam2-segmentation` v7), Python 3.12.13, torch 2.14.0+cu130 | Default generated dataset | **PASS** — clean cache; 11/11 code cells after one expected install restart; 229.4 s; 18/6 split; 36 optimizer steps; weight delta 0.108819; held-out IoU 0.998254 → 0.998457; unseen IoU 1.0; exact reload |
 
 ### Local E2E pre-flight (not promotion evidence)
 
@@ -52,4 +52,4 @@ A failed default path, missing gradient update, altered split, unsafe artifact, 
 
 ## Current status
 
-The current E2E implementation and generated carrier remain **Candidate**, with the clean-runtime gate **pending**. The v6 executor evidence and output hashes remain preserved under `verification/2026-09-18-kaggle-t4/`, but they qualify only the superseded `f7a0460` carrier. A fresh run must use the exact current carrier/blob named above and follow the supported procedure before the gate can be satisfied. Synthetic held-out scores are workflow evidence only and cannot establish quality improvement; promotion remains a separate reviewer/integrator decision.
+The current E2E implementation and generated carrier remain **Candidate**, with the exact-carrier clean-runtime gate **passed**. Kaggle T4 v7 evidence and output hashes are preserved under `verification/2026-09-18-kaggle-t4/`; the v6 evidence remains historical for superseded carrier `f7a0460`. Synthetic held-out scores are workflow evidence only and cannot establish quality improvement; Release-grade promotion remains a separate decision.
