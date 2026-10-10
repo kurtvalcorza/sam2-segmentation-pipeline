@@ -1,0 +1,76 @@
+[colab] Parsing notebook '/home/kurt/colab-runs/sam2-segmentation-pipeline-67293df-453b4f/sam2_segmentation_colab_67293df_colab-cli-t4.ipynb'...
+[colab] Executing cell 1/12 - Infrastructure: check the runtime, accelerator and disk; create (or keep) the run directory...
+{'accelerator': 'Tesla T4, 15360 MiB', 'kernel_python': '3.13.15', 'run_directory': '/content/dimer_runs/sam2_segmentation/8da0291f3dad', 'outputs': '/content/outputs', 'weights': '/content/weights', 'environment_root': '/tmp/dimer_uv', 'free_gib': {'weights': 193.3, 'environment': 193.3}}
+[colab] Executing cell 2/12 - Infrastructure: write and verify the carried package, stage runner, lock, manifest and samples...
+{'carried_files': 7, 'verified': True, 'repository': 'kurtvalcorza/sam2-segmentation-pipeline', 'revision': 'f60fa852d6b0f2782491bee4112fa126edf74b9b', 'generator': 'build_notebook.py/3.0'}
+[colab] Executing cell 3/12 - Infrastructure: build (or reuse) the isolated locked environment and define the stage runner...
+{'notebook_source': 'f60fa852d6b0f2782491bee4112fa126edf74b9b', 'python': '3.12.12', 'torch': '2.14.0', 'transformers': '4.57.6', 'safetensors': '0.8.0', 'cuda': True, 'locked_packages': 47, 'environment': '/tmp/dimer_uv/venv-4bf4b3491c86c884', 'environment_reused': False, 'setup_seconds': 67}
+[colab] Executing cell 4/12 - Infrastructure: stage and digest-verify the pinned checkpoint...
+Running stage 'weights' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/weights.log
+{'model_id': 'facebook/sam2.1-hiera-small', 'revision': 'ee5bba1d82bb8749febdf90f45e84b687142ba03', 'license': 'apache-2.0', 'files': 7, 'total_bytes': 184336196}
+{'weights_dir': '/content/weights/sam2.1-hiera-small', 'fetched': ['README.md', 'config.json', 'model.safetensors', 'preprocessor_config.json', 'processor_config.json', 'sam2.1_hiera_s.yaml', 'video_preprocessor_config.json']}
+{'verified_files': 7, 'revision': 'ee5bba1d82bb8749febdf90f45e84b687142ba03', 'total_bytes': 184336196}
+[colab] Executing cell 5/12 - sam2_segmentation-14...
+Running stage 'data' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/data.log
+{'dataset_kind': 'generated', 'origin': 'deterministic generated shape scenes (seeds 8100..8123)', 'records': 24, 'train': 18, 'held_out': 6}
+{'split': 'fixed generated split: generated-00..17 train, generated-18..23 held out (the recorded split)'}
+{'unseen': 'a separately generated scene (generated-24) outside the train and held-out index range'}
+[colab] Executing cell 6/12 - sam2_segmentation-17...
+Running stage 'validate' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/validate.log
+{
+  "kind": "generated",
+  "split": "fixed generated split: generated-00..17 train, generated-18..23 held out (the recorded split)",
+  "overlap_ids": []
+}
+{'train_records': 18, 'held_out_records': 6, 'written': 'outputs/sam2_segmentation_dataset_manifest.json'}
+[colab] Executing cell 7/12 - sam2_segmentation-20...
+Running stage 'baseline' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/baseline.log
+You are using a model of type sam2_video to instantiate a model of type sam2. This is not supported for all configurations of models and can yield errors.
+{'condition': 'point+box', 'mean_mask_iou': 0.998254, 'per_record': [1.0, 1.0, 1.0, 0.9974, 0.9924, 0.9997], 'box_baseline_mean_iou': 0.856681}
+{'condition': 'point-only', 'mean_mask_iou': 0.998396, 'per_record': [0.9993, 1.0, 0.9991, 0.9995, 0.9924, 1.0], 'box_baseline_mean_iou': None}
+[colab] Executing cell 8/12 - sam2_segmentation-23...
+Running stage 'adapt' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/adapt.log
+You are using a model of type sam2_video to instantiate a model of type sam2. This is not supported for all configurations of models and can yield errors.
+{'parameters': {'trainable_parameters': 139808, 'frozen_parameters': 38398769}, 'device': 'cuda:0', 'seconds': 5.78, 'weight_delta_l2': 0.10881876898456387}
+{'epoch': 1, 'train_loss': 0.007102, 'optimizer_steps': 18, 'val_mask_iou': 0.998383}
+{'epoch': 2, 'train_loss': 0.005357, 'optimizer_steps': 18, 'val_mask_iou': 0.998457}
+{'adapter': 'outputs/sam2-mask-hypernetwork-adapter-v1', 'note': 'Sections 8-10 attach this adapter to a fresh pinned base in their own processes'}
+[colab] Executing cell 9/12 - sam2_segmentation-26...
+Running stage 'evaluate' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/evaluate.log
+You are using a model of type sam2_video to instantiate a model of type sam2. This is not supported for all configurations of models and can yield errors.
+{'condition': 'point+box', 'pretrained_mean_iou': 0.998254, 'adapted_mean_iou': 0.998457, 'change': 0.000204, 'records_improved': '3/6'}
+{'id': 'generated-18', 'pretrained': 1.0, 'adapted': 0.99986, 'change': -0.00014}
+{'id': 'generated-19', 'pretrained': 1.0, 'adapted': 1.0, 'change': 0.0}
+{'id': 'generated-20', 'pretrained': 1.0, 'adapted': 0.999809, 'change': -0.000191}
+{'id': 'generated-21', 'pretrained': 0.99737, 'adapted': 0.998355, 'change': 0.000985}
+{'id': 'generated-22', 'pretrained': 0.992438, 'adapted': 0.992721, 'change': 0.000282}
+{'id': 'generated-23', 'pretrained': 0.999713, 'adapted': 1.0, 'change': 0.000287}
+{'condition': 'point-only', 'pretrained_mean_iou': 0.998396, 'adapted_mean_iou': 0.998054, 'change': -0.000343, 'records_improved': '0/6'}
+{'id': 'generated-18', 'pretrained': 0.999298, 'adapted': 0.998876, 'change': -0.000421}
+{'id': 'generated-19', 'pretrained': 1.0, 'adapted': 0.999811, 'change': -0.000189}
+{'id': 'generated-20', 'pretrained': 0.999142, 'adapted': 0.999047, 'change': -9.5e-05}
+{'id': 'generated-21', 'pretrained': 0.999506, 'adapted': 0.999011, 'change': -0.000494}
+{'id': 'generated-22', 'pretrained': 0.992433, 'adapted': 0.991576, 'change': -0.000857}
+{'id': 'generated-23', 'pretrained': 1.0, 'adapted': 1.0, 'change': 0.0}
+{'prompt_box_fill_baseline_mean_iou': 0.856681, 'note': 'filling the prompt box shows what prompting adds; it is not the adaptation comparison'}
+{'interpretation': 'point+box: no headroom — the pretrained model already scores 0.9983 mean IoU, so the adapted 0.9985 (+0.0002, 3/6 records improved) is a mechanics check, not evidence that adaptation helped'}
+{'interpretation': 'point-only: no headroom — the pretrained model already scores 0.9984 mean IoU, so the adapted 0.9981 (-0.0003, 0/6 records improved) is a mechanics check, not evidence that adaptation helped'}
+{'report': 'outputs/sam2_segmentation_evaluation_report.json'}
+[colab] Executing cell 10/12 - sam2_segmentation-29...
+Running stage 'unseen' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/unseen.log
+You are using a model of type sam2_video to instantiate a model of type sam2. This is not supported for all configurations of models and can yield errors.
+{'record': 'a separately generated scene (generated-24) outside the train and held-out index range', 'mask_iou_sample_sanity': 1.0, 'model_iou_score': 0.992438}
+{'artifact_format': 'org.valcorza.sam2.mask-decoder-adapter', 'files': ['adapter.safetensors', 'manifest.json']}
+{'verification': 'PASSED', 'process': 'fresh (separate from the adapting stage)', 'mask_exact': True, 'scores_within_tolerance': True, 'score_rtol': 1e-05, 'score_atol': 1e-06, 'artifact_dir': '/content/outputs/sam2-mask-hypernetwork-adapter-v1'}
+[colab] Executing cell 11/12 - sam2_segmentation-32...
+Running stage 'result' in the isolated environment; log: /content/dimer_runs/sam2_segmentation/8da0291f3dad/logs/result.log
+{'status': 'E2E COMPLETE', 'dataset_kind': 'generated', 'optimizer_steps': 36, 'weight_delta_l2': 0.108819, 'reload': 'PASSED', 'runtime': {'python': '3.12.12', 'torch': '2.14.0', 'transformers': '4.57.6', 'safetensors': '0.8.0', 'device': 'cuda:0'}}
+outputs/:
+  - outputs/sam2-mask-hypernetwork-adapter-v1/adapter.safetensors (546.8 KB)
+  - outputs/sam2-mask-hypernetwork-adapter-v1/manifest.json (3.2 KB)
+  - outputs/sam2_segmentation_dataset_manifest.json (0.6 KB)
+  - outputs/sam2_segmentation_evaluation_report.json (4.3 KB)
+  - outputs/sam2_segmentation_result.json (9.7 KB)
+[colab] Executing cell 12/12 - sam2_segmentation-34...
+Optional activity skipped: tick RUN_ACTIVITY to run it. The canonical outputs are complete.
+[colab] Saving notebook with outputs to '/home/kurt/colab-runs/sam2-segmentation-pipeline-67293df-453b4f/sam2_segmentation_colab_67293df_colab-cli-t4_output.ipynb'...

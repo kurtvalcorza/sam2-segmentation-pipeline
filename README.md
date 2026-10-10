@@ -64,7 +64,7 @@ weights/sam2.1-hiera-small/
 
 ## Release status
 
-**Candidate.** The exact current carrier (`d2fc69765370` / notebook blob `56a0f9889498`, embedding source `9f3f2210e65b`) passed a clean-cache Kaggle T4 v7 execution: 11/11 code cells, 36 optimizer steps, nonzero weight movement, held-out evaluation, unseen inference, and exact fresh-base reload. Exact identities, metrics, and output hashes are recorded in `docs/release-verification.md`; Release-grade promotion remains separate.
+**Candidate.** The current carrier (commit `67293df6441d` / notebook blob `af2c88bdd411`) completed a one-pass Colab CLI execution on a fresh Colab T4 (2026-10-10): 12/12 code cells, no restart, 0 errors, 36 optimizer steps, nonzero weight movement, per-record held-out evaluation under both prompt conditions (both at ceiling: a mechanics check), unseen inference, and exact fresh-base reload. Evidence is under `docs/execution-evidence/2026-10-10-67293df/` and in `docs/release-verification.md`; the earlier Kaggle T4 v7 run of the previous carrier needed a restart and does not carry over. BYOD and the activity were not exercised on hosted hardware; Release-grade promotion remains separate.
 
 ## Documentation
 
