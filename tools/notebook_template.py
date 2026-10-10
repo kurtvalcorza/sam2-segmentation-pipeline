@@ -81,10 +81,12 @@ TEMPLATE = {
         "**Read this before Section 8: the default task leaves almost nothing to adapt.** Each generated scene is one bright "
         "shape on a flat dark background, and the recorded condition gives the model the shape's exact box and an interior "
         "point. The pretrained model already scored held-out mask IoU 0.998254 in the recorded run, and the adapted model "
-        "0.998457 — a change of +0.0002 on six images, which is a mechanics check, not an improvement. So the notebook also "
-        "scores a **harder held-out condition, point-only prompts** (no box), generated from the same records, and prints "
-        "every held-out record before and after. No hosted run of the point-only condition is recorded yet: read your own "
-        "numbers. A harder default dataset is a decision left to the maintainer."
+        "0.998457 — a change of +0.0002 on six images, which is a mechanics check, not an improvement. The notebook also "
+        "scores a second held-out condition, **point-only prompts** (no box), generated from the same records, and prints "
+        "every held-out record before and after. One interior point is enough on a single high-contrast shape, so point-only "
+        "is at ceiling too (about 0.998 mean IoU before and after adaptation in a local check of the pinned checkpoint). "
+        "Neither condition can show an adaptation effect: the lesson here is the workflow — validate, measure, adapt, export, "
+        "reload, and read the result honestly — not a gain."
     ),
     "learning_objectives": (
         "by the end of this notebook you will be able to —\n\n"
@@ -245,13 +247,14 @@ TEMPLATE = {
         {
             "md": (
                 "**What to notice:** point+box mean IoU 0.998254 in the recorded run (every record near 1.0), the prompt-box fill "
-                "baseline 0.856681, and the point-only row.\n\n"
+                "baseline 0.856681, and the point-only row — also near 1.0.\n\n"
                 "**Checkpoint:** what is the most the fine-tune could gain under point+box prompts here?\n\n"
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
                 "At most 1 − 0.998254 ≈ 0.0017 mean IoU — the pretrained model is at ceiling, because one bright shape on a flat "
                 "background with its exact box is easy for a promptable segmenter. Any change Section 8 shows under that condition "
-                "is too small to read on six records. Point-only prompts remove the box, so the model must find the extent itself; "
-                "if its baseline sits clearly below 1.0, that condition is the one with room to show an effect. The box-fill "
+                "is too small to read on six records. Point-only prompts remove the box, so the model must find the extent itself "
+                "— but one interior point is enough on a single high-contrast shape, and that baseline sits near 0.998 too, so "
+                "neither condition leaves room to show an effect here. The box-fill "
                 "baseline (0.857) measures what prompting adds, not what adaptation adds.\n\n"
                 "</details>"
             ),
@@ -301,13 +304,13 @@ TEMPLATE = {
         {
             "md": (
                 "**What to notice:** point+box 0.998254 → 0.998457 in the recorded run with the *no headroom* interpretation, the "
-                "per-record rows, and the point-only rows (not yet recorded on hosted hardware).\n\n"
+                "per-record rows, and the point-only rows, which carry the same *no headroom* interpretation.\n\n"
                 "**Checkpoint:** a classmate says \"fine-tuning improved SAM from 0.99825 to 0.99846\". What would you reply?\n\n"
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
                 "That the difference is +0.0002 mean IoU on six records that were already at ceiling: it is within what any small "
                 "perturbation would produce, and the weights moving (Section 7) does not show quality changed. The run shows the "
-                "adaptation machinery works. To claim improvement you would need a condition with headroom — the point-only rows, "
-                "or harder data — a change that holds across most records, and more than one holdout.\n\n"
+                "adaptation machinery works. To claim improvement you would need data with headroom — textured "
+                "backgrounds, low contrast, occlusion or loose boxes; point-only prompts do not supply it on these scenes — a change that holds across most records, and more than one holdout.\n\n"
                 "</details>"
             ),
         },
@@ -367,8 +370,8 @@ TEMPLATE = {
                 "**What to notice (if you ran it):** whether the larger rate moves either condition, and in which direction.\n\n"
                 "<details>\n<summary>Check your reasoning (open after running)</summary>\n\n"
                 "No hosted run of the activity is recorded yet, so compare your rows. Under point+box there is almost no room to "
-                "gain, so a larger rate can mostly only hurt; any effect, up or down, is more readable under point-only, where the "
-                "baseline is lower. A rate that improves the training loss but lowers held-out IoU is overfitting 18 easy scenes.\n\n"
+                "gain, and point-only sits at ceiling too, so a larger rate can mostly only hurt either condition; read the direction "
+                "per record, not the size. A rate that improves the training loss but lowers held-out IoU is overfitting 18 easy scenes.\n\n"
                 "</details>"
             ),
         },
@@ -399,7 +402,7 @@ TEMPLATE = {
         "score a fixed held-out split per record under two prompt conditions, serialize only the adapter, attach it to the exact "
         "pinned base in a fresh process, and reproduce inference after reload. On the default point+box condition the pretrained "
         "model is already at ceiling, so that comparison is a mechanics check: it cannot show that adaptation helps, and the "
-        "notebook says so. The point-only condition has more room; read its per-record change before drawing any conclusion. "
+        "notebook says so. The point-only condition is at ceiling on these scenes as well, so it cannot show it either. "
         "Nothing here shows improvement on photographs or any deployment domain. Real use requires rights-cleared representative "
         "images, human-reviewed masks, leakage-safe (grouped) splits, and boundary-error analysis.\n\n"
         "Successful execution proves that the recorded repository revision can complete this bounded tutorial without the "
@@ -411,8 +414,8 @@ TEMPLATE = {
         "<details>\n<summary>Sample conclusion (open after writing yours)</summary>\n\n"
         "Under point+box prompts the pretrained model scored 0.998254 mean IoU on six held-out scenes, leaving almost no "
         "headroom, so the adapted 0.998457 (+0.0002) is a mechanics check: the hypernetwork trained, the adapter exported, and a "
-        "fresh base plus the adapter reproduced the masks exactly. The point-only condition is the one that can show an effect, "
-        "and I would read its per-record changes rather than the mean. Before claiming improvement on my own images I would need "
+        "fresh base plus the adapter reproduced the masks exactly. Point-only prompts were near ceiling too, so neither "
+        "condition shows whether adaptation helps. Before claiming improvement on my own images I would need "
         "representative, human-reviewed masks, a grouped split, several seeds or folds for a dispersion estimate, and a "
         "condition where the pretrained model is clearly imperfect.\n\n"
         "</details>\n\n"

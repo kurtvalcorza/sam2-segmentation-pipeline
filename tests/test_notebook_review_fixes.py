@@ -101,7 +101,10 @@ def _run(tmp_path: Path, options: dict | None = None):
     root = tmp_path / "run"
     if not (root / "src").exists():
         root.mkdir(parents=True, exist_ok=True)
-        (root / "src").symlink_to(ROOT / "src", target_is_directory=True)
+        try:
+            (root / "src").symlink_to(ROOT / "src", target_is_directory=True)
+        except OSError:  # Windows without the symlink privilege: a copy carries the same sources
+            shutil.copytree(ROOT / "src", root / "src", ignore=shutil.ignore_patterns("__pycache__"))
     return STAGES.Run(root, tmp_path / "outputs", tmp_path / "weights", options or {})
 
 
@@ -168,6 +171,9 @@ def test_M1_no_kernel_install_and_no_restart_instruction() -> None:
     assert "MPLBACKEND='Agg'" in install and "'PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP'" in install
 
 
+LINUX_ONLY = pytest.mark.skipif(sys.platform != "linux", reason="executes the Section 1 check cell, which refuses any runtime but Linux x86_64 (the lock is manylinux)")
+
+
 def _exec_check_cell(ns: dict, **overrides) -> None:
     src = _cell_with("# @title Infrastructure: check the runtime")
     src = re.sub(r"'environment': [0-9.]+}", "'environment': 0.0}", src, count=1)
@@ -178,6 +184,7 @@ def _exec_check_cell(ns: dict, **overrides) -> None:
         exec(compile(src, "<check>", "exec"), ns)
 
 
+@LINUX_ONLY
 def test_M1_section1_is_idempotent(tmp_path, monkeypatch, fake_gpu) -> None:
     monkeypatch.chdir(tmp_path)
     ns: dict = {}
@@ -190,6 +197,7 @@ def test_M1_section1_is_idempotent(tmp_path, monkeypatch, fake_gpu) -> None:
     assert ns["ROOT"] != first
 
 
+@LINUX_ONLY
 def test_M1_second_run_all_reuses_the_matching_environment(tmp_path, monkeypatch, fake_gpu) -> None:
     import subprocess as real_subprocess
 
@@ -227,6 +235,7 @@ def test_M1_second_run_all_reuses_the_matching_environment(tmp_path, monkeypatch
 # ---------------------------------------------------------------- SAM-m2: GPU checked up front; warning explained
 
 
+@LINUX_ONLY
 def test_m2_cpu_runtime_stops_in_section_1(tmp_path, monkeypatch) -> None:
     """SAM-m2: with no nvidia-smi the first code cell stops with the runtime-change instruction, before any download."""
     monkeypatch.chdir(tmp_path)
@@ -243,10 +252,14 @@ def test_m2_sam2_video_warning_is_explained() -> None:
 # ---------------------------------------------------------------- SAM-M2: saturation disclosed; harder condition; per-record
 
 
-def test_M2_saturation_is_disclosed_and_a_harder_condition_is_scored() -> None:
+def test_M2_saturation_is_disclosed_and_a_second_condition_is_scored() -> None:
     md = "\n".join(_src(c) for c in _nb()["cells"] if c["cell_type"] == "markdown")
     assert "the default task leaves almost nothing to adapt" in md and "0.998254" in md and "mechanics check" in md
-    assert "point-only" in md and "No hosted run of the point-only condition is recorded yet" in md
+    assert "point-only" in md and "is at ceiling too" in md and "Neither condition can show an adaptation effect" in md
+    # Measured on the pinned checkpoint, point-only is ~0.998 as well: no markdown may promise it more room.
+    for stale in ("harder held-out condition", "has more room", "is the one that can show an effect", "is the one with room", "where the baseline is lower"):
+        assert stale not in md, stale
+    assert "harder" not in STAGES.CONDITIONS["point-only"]
     assert set(STAGES.CONDITIONS) == {"point+box", "point-only"}
     records = [{"id": "a", "box": [1.0, 1.0, 5.0, 5.0], "points": [[2.0, 2.0]], "point_labels": [1]}]
     assert STAGES.condition(records, "point-only")[0]["box"] is None and STAGES.condition(records, "point+box")[0]["box"] == [1.0, 1.0, 5.0, 5.0]
@@ -391,3 +404,22 @@ def test_reload_is_a_contract_check_against_the_adapting_process() -> None:
     body = source[source.index("def stage_unseen"):source.index("def stage_result")]
     assert "pipe, adapt = adapted_pipeline(run, P)" in body and "Do not ship this artifact" in body
     assert (STAGES.RELOAD_RTOL, STAGES.RELOAD_ATOL) == (1e-5, 1e-6)
+
+
+def test_stage_processes_import_neither_ipython_nor_google_colab() -> None:
+    """Stages run in the isolated environment, which has neither IPython nor google.colab: only kernel cells may use
+    them (the BYOD upload dialog). A carried module that imported either would fail on Colab; there is no worker and no
+    google.colab stub to give a ModuleSpec."""
+    sys.path.insert(0, str(TOOLS))
+    try:
+        build = _load("sam_build_notebook", TOOLS / "build_notebook.py")
+        template = _load("sam_notebook_template", TOOLS / "notebook_template.py").TEMPLATE
+    finally:
+        sys.path.remove(str(TOOLS))
+    carried = [ROOT / source for dest, source in build.carried_sources(ROOT, template).items() if dest.endswith(".py")]
+    assert any(path.name == "tutorial_stages.py" for path in carried) and any(path.name == "pipeline.py" for path in carried)
+    pattern = re.compile(r"^\s*(from|import)\s+(IPython|google)\b", re.M)
+    offenders = [str(path) for path in carried if pattern.search(path.read_text(encoding="utf-8"))]
+    assert not offenders, offenders
+    text = NB.read_text(encoding="utf-8")
+    assert "sys.modules['google" not in text and 'sys.modules[\\"google' not in text and "ModuleType(\\\"google" not in text

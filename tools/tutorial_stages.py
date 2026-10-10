@@ -48,7 +48,7 @@ BYOD_MAX_UNCOMPRESSED = 512 * 1024 * 1024
 BYOD_MAX_TOTAL_PIXELS = 32 * 1024 * 1024
 CONDITIONS = {
     "point+box": "the shape's exact bounding box and one interior point (the recorded condition)",
-    "point-only": "one interior point, no box (harder: the model must find the extent itself)",
+    "point-only": "one interior point, no box (the model must find the extent itself; on these high-contrast scenes it is at ceiling too)",
 }
 
 
