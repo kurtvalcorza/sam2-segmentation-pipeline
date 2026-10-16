@@ -963,12 +963,16 @@ class SAM2SegmentationPipeline:
                         multimask_output=False,
                         **device_prompts,
                     ).pred_masks[0, 0, 0]
-                    target_low = (
-                        F.interpolate(
-                            device_target[None, None], size=logits.shape, mode="area"
-                        )[0, 0]
-                        > 0
-                    ).to(logits.dtype)
+                    # Majority vote per low-res cell: thresholding the area fraction at '> 0' dilated
+                    # masks larger than the 256x256 logits by up to one cell (SAM2-m6). A mask
+                    # with no majority cell keeps every cell it touches: never an empty target.
+                    fraction = F.interpolate(
+                        device_target[None, None], size=logits.shape, mode="area"
+                    )[0, 0]
+                    target_low = fraction >= 0.5
+                    if not bool(target_low.any()):
+                        target_low = fraction > 0
+                    target_low = target_low.to(logits.dtype)
                     probabilities = logits.sigmoid()
                     bce = F.binary_cross_entropy_with_logits(logits, target_low)
                     dice = 1.0 - (2.0 * (probabilities * target_low).sum() + 1.0) / (

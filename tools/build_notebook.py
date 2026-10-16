@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a STANDALONE DIMER tutorial notebook (NOTEBOOK_SPEC 2.2 §4) from repository sources — /3.
+"""Generate a STANDALONE DIMER tutorial notebook (NOTEBOOK_SPEC 2.5 §4) from repository sources — /3.
 
 /3 replaces the in-kernel ``pip install`` of /2 (and its restart-on-stale-import guard) with the isolated, hash-locked
 environment of the NOTEBOOK_SPEC 2.2 reference notebooks (§25.13; the fleet pattern of
@@ -7,7 +7,7 @@ environment of the NOTEBOOK_SPEC 2.2 reference notebooks (§25.13; the fleet pat
 notebook kernel, so a hosted runtime's preloaded packages are never replaced and no restart is ever needed
 (RUN1, RUN10, ENV6). The notebook
 
-1. checks the runtime (Linux x86_64, disk; a CUDA GPU is recommended, not required) and creates a run directory
+1. checks the runtime (Linux x86_64, disk; a CUDA GPU when the template sets ``require_gpu``) and creates a run directory
    ``ROOT`` — re-running that cell in the same session keeps ``ROOT``, so later cells are never stranded;
 2. writes the carried files — the repository's package under ``src/``, the stage runner, the hash-locked
    requirements, the pinned snapshot manifest, any pinned sample files, the licence and ``source.json`` — to
@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any
 
 GENERATOR_VERSION = "build_notebook.py/3.0"
-NOTEBOOK_SPEC = "2.2"
+NOTEBOOK_SPEC = "2.5"
 SOURCE_RECORD = "source.json"
 LOCK_DEST = "requirements.txt"
 RUNNER_DEST = "tutorial_stages.py"
@@ -63,6 +63,8 @@ def template_contract() -> dict[str, str]:
         "run_all": "the Run-all declaration (§28)",
         "byod": "the BYOD declaration (§28)",
         "title": "H1 text",
+        "kind": "metadata.dimer.notebook_kind (KND1): TUTORIAL, DEMO, WORKSHOP or CAPSTONE",
+        "notice": "the use notice blockquote placed after the title and badges (DOC17-DOC21)",
         "badges": "list of (alt, image_url, link_url)",
         "capability": "one-line capability statement",
         "intro": "markdown paragraphs after the header block (no heading)",
@@ -410,12 +412,18 @@ def run_stage(stage, **options):
         detail = 'see the log above'
         if error_file.is_file():
             error = json.loads(error_file.read_text(encoding='utf-8'))
+            if error.get('refusal'):  # an expected refusal of your input (DAT20): the message above says what to fix
+                print('Fix the named file or setting and run the Section 4 data cell again; the later cells will not run on the old results until it succeeds.')
+                return False
             detail = error['type'] + ': ' + error['message']
         raise RuntimeError(f'Stage {{stage!r}} failed (exit {{process.returncode}}): {{detail}}')
+    return True
 
 
 def load_record(name):
-    \"\"\"A JSON record a stage wrote to OUTPUTS.\"\"\"
+    \"\"\"A JSON record a stage wrote to OUTPUTS; refused while the latest data stage refused its input.\"\"\"
+    if (ROOT / 'state' / 'data.refused.json').is_file():
+        raise RuntimeError('The Section 4 data stage refused its input, so files in outputs/ belong to an earlier run: fix the input and run Section 4 again.')
     return json.loads((OUTPUTS / name).read_text(encoding='utf-8'))"""
 
 WEIGHTS_CELL = """# @title Infrastructure: stage and digest-verify the pinned checkpoint
@@ -438,6 +446,10 @@ def _infrastructure_code(key: str, ctx: dict[str, Any], template: dict[str, Any]
             if cell.count(soft) != 1:
                 raise SystemExit("require_gpu: the CPU notice in the check cell was not found exactly once")
             cell = cell.replace(soft, hard)
+            optional = " A GPU is recommended, not required."
+            if cell.count(optional) != 1:
+                raise SystemExit("require_gpu: the platform message's GPU sentence was not found exactly once")
+            cell = cell.replace(optional, "")  # the next check refuses a CPU runtime, so the GPU is not optional (SAM2-m5)
         return cell
     if key == "carrier":
         return CARRIER_CELL.format(files=repr(ctx["files"]), binary=repr(ctx["binary"]), hashes=repr(ctx["hashes"]), source=SOURCE_RECORD)
@@ -542,7 +554,8 @@ def render(repo: Path, template: dict[str, Any], revision: str | None = None) ->
     extra_hosts = f", plus {template['extra_hosts']}" if template.get("extra_hosts") else ""
     header = (
         f"# {template['title']}\n\n{badges}\n\n"
-        f"**Profile:** `{template['profile']}`  \n"
+        + (f"{template['notice'].strip()}\n\n" if template.get("notice") else "")
+        + f"**Profile:** `{template['profile']}`  \n"
         f"**Mode:** `{template['mode']}`  \n"
         f"**Notebook specification:** DIMER Notebook Specification {NOTEBOOK_SPEC} — **standalone** (§4)  \n"
         f"**Capability:** {template['capability']}\n\n"
@@ -594,11 +607,12 @@ def render(repo: Path, template: dict[str, Any], revision: str | None = None) ->
     return {
         "cells": cells,
         "metadata": {
-            "accelerator": "GPU",  # recommended; the notebook also runs on a CPU-only runtime
+            "accelerator": "GPU",  # recommended; required when the template sets require_gpu
             "colab": {"gpuType": "T4", "name": template["notebook_name"], "provenance": []},
             "dimer": {
                 "notebook_profile": template["profile"],
                 "notebook_mode": template["mode"],
+                "notebook_kind": template["kind"],
                 "notebook_spec": NOTEBOOK_SPEC,
                 "standalone": True,
                 "requires_dimer_worker": False,

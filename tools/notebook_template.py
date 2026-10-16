@@ -1,4 +1,4 @@
-"""Per-repository template for tools/build_notebook.py /3 (NOTEBOOK_SPEC 2.2 §4 standalone, §25.13 isolated environment).
+"""Per-repository template for tools/build_notebook.py /3 (NOTEBOOK_SPEC 2.5 §4 standalone, §25.13 isolated environment).
 
 The generator writes the infrastructure cells (runtime check — which stops on a CPU-only runtime, since the fine-tune
 needs CUDA —, carrier, isolated install + stage runner, snapshot staging) from repository files; this template holds the
@@ -34,6 +34,17 @@ TEMPLATE = {
     "notebook_name": "sam2_segmentation_colab.ipynb",
     "profile": "E2E",
     "mode": "GUIDED",
+    "kind": "TUTORIAL",
+    "notice": (
+        "> **⚠️ Notice.** For research, training and evaluation only. Not validated for production,\n"
+        "> clinical, diagnostic or safety-critical use. Running this notebook downloads third-party\n"
+        "> model weights and datasets under their own licenses (see the model card [4]) and uses compute\n"
+        "> on your own Colab or Kaggle account. Data you bring stays in your runtime, and you are\n"
+        "> responsible for having the right to use it. Results here are tutorial evidence, not\n"
+        "> benchmarks. Everything is provided \"as is\", without warranty of any kind. To the maximum\n"
+        "> extent permitted by law, the maintainers and the DIMER platform accept no liability for\n"
+        "> its use."
+    ),
     "stage_runner": "tools/tutorial_stages.py",
     "run_all": (
         "Selecting **Run all** on a fresh Linux x86_64 runtime with a CUDA GPU (Colab T4 or Kaggle GPU) builds an isolated "
@@ -51,7 +62,9 @@ TEMPLATE = {
         "or inside one wrapping folder; at least 8 pairs, at most 64. The held-out split is a seeded shuffle; set "
         "`GROUP_SEPARATOR` (for example `_`) so frames or crops of one scene (`scene1_a`, `scene1_b`) stay on one side. Your "
         "records pass through the same validation, baseline, adaptation, evaluation, export and reload path, and the unseen "
-        "inference and reload check run on one of your held-out records. Every refusal names the archive and the rule."
+        "inference and reload check run on one of your held-out records. Every refusal names the archive and the rule. SAM 2 "
+        "was pretrained on SA-1B and SA-V [1], [2]: images taken from public photo collections may overlap that data, so a "
+        "high pretrained IoU on them can partly reflect pretraining exposure."
     ),
     "title": "SAM 2.1 Hiera-Small — DIMER end-to-end promptable segmentation fine-tuning",
     "badges": [
@@ -73,18 +86,18 @@ TEMPLATE = {
     ],
     "capability": "pinned SAM 2.1 inference plus bounded mask-hypernetwork gradient adaptation, held-out mask-IoU evaluation, safe adapter export, and fresh reload",
     "intro": (
-        "This notebook performs a real local gradient update. It freezes the Hiera encoder, prompt encoder, and the rest of "
+        "This notebook performs a real local gradient update of SAM 2.1 [1] (the pinned `{MODEL_ID}` checkpoint [3]). It freezes the Hiera encoder, prompt encoder, and the rest of "
         "the mask decoder, then trains only the first mask-token output hypernetwork (139,808 parameters) with BCE plus "
         "soft-Dice loss. The default dataset is 24 deterministic generated shape scenes split 18/6 before model execution. A "
         "SafeTensors adapter and closed SHA-256 manifest are exported and attached to a fresh pinned base model. These are "
         "tutorial sample-sanity results, not a segmentation benchmark.\n\n"
         "**Read this before Section 8: the default task leaves almost nothing to adapt.** Each generated scene is one bright "
         "shape on a flat dark background, and the recorded condition gives the model the shape's exact box and an interior "
-        "point. The pretrained model already scored held-out mask IoU 0.998254 in the recorded run, and the adapted model "
-        "0.998457 — a change of +0.0002 on six images, which is a mechanics check, not an improvement. The notebook also "
+        "point. The pretrained model already scored held-out mask IoU 0.999394 in the CPU build record (see How to use this "
+        "notebook), and the adapted model 0.999599 — a change of +0.0002 on six images, which is a mechanics check, not an improvement. The notebook also "
         "scores a second held-out condition, **point-only prompts** (no box), generated from the same records, and prints "
         "every held-out record before and after. One interior point is enough on a single high-contrast shape, so point-only "
-        "is at ceiling too (about 0.998 mean IoU before and after adaptation in a local check of the pinned checkpoint). "
+        "is at ceiling too (0.999538 before and 0.999178 after adaptation, 0 of 6 records improved, in the same record). "
         "Neither condition can show an adaptation effect: the lesson here is the workflow — validate, measure, adapt, export, "
         "reload, and read the result honestly — not a gain."
     ),
@@ -131,7 +144,9 @@ TEMPLATE = {
                 "produced and how to read it. **[Engineering]** — reproducibility, provenance and packaging.\n\n"
                 "**Predict, then check.** Before Sections 6, 7 and 8 a **Predict before running** prompt asks you to commit to an "
                 "expectation; **What to notice** follows each stage; a collapsed **Check your reasoning** answer follows each "
-                "checkpoint. The sample answers quote the recorded Kaggle T4 run for the point+box condition."
+                "checkpoint. The sample answers quote the **CPU build record**: this notebook's own stage code run end to end on a "
+                "CPU (float32, torch 2.14.0, transformers 4.57.6) at the commit that generated it, 2026-10-17. They are pending "
+                "the hosted Colab T4 run of this exact notebook (REL13); a GPU run can differ in the last digits."
             ),
             (
                 "## The task: Input → Model → Output\n\n"
@@ -181,13 +196,23 @@ TEMPLATE = {
             "md": (
                 "## 4. Generate or supply a paired segmentation dataset · [Evaluation practice]\n\n"
                 "The default 24 deterministic 256×256 scenes contain one rounded rectangle or ellipse plus a distractor rectangle on "
-                "a flat background. Each record has an RGB image, a boolean mask, a foreground point and a bounding box. Records "
+                "a flat background, drawn by code in the carried stage runner [5] (no downloaded data). Each record has an RGB "
+                "image, a boolean mask, a foreground point and a bounding box. Where the distractor covers part of the shape (two "
+                "of the 25 scenes, by 13 and 48 pixels), the mask is the shape's **visible** region: covered pixels are background. "
+                "The point and box are derived from that mask: the point is the median of the mask's pixel indices (x, y), and the "
+                "box is `[x_min, y_min, x_max + 1, y_max + 1]` — the outer pixel edges — in original-image pixels. BYOD prompts "
+                "are derived from your masks the same way. Records "
                 "0–17 train; 18–23 are held out — fixed before any model runs, so nothing the model does can influence the split.\n\n"
+                "**Pretraining overlap.** SAM 2 was trained on SA-1B [2] and SA-V [1]. The default scenes are generated in this run, "
+                "so they cannot overlap that data. BYOD images drawn from public photo collections may overlap SA-1B; on such "
+                "images a high pretrained IoU can partly reflect pretraining exposure rather than generalisation.\n\n"
                 "**Bring your own data.** Set `USE_BYOD = True` and `BYOD_ZIP_PATH` (or, in Colab, leave it empty for the upload "
                 "dialog; on Kaggle a single attached ZIP is found automatically). The split is a seeded shuffle of 25 % of the "
                 "records; set `GROUP_SEPARATOR` so records whose stems share a prefix (`scene1_a`, `scene1_b` with `_`) stay "
                 "together, otherwise every image is treated as independent. A wrapping folder, unmatched stems (named), JPEG "
-                "masks, unsafe paths, oversized archives and fewer than 8 pairs each stop this cell with their own message."
+                "masks, unsafe paths, oversized archives and fewer than 8 pairs are each refused with one message naming the file "
+                "and the rule. A refusal changes nothing in `outputs/`: files from an earlier run stay there, but the later cells "
+                "will not run on them (each prints *not run*) until this cell succeeds with corrected input."
             ),
             "code": (
                 "USE_BYOD = False  # @param {{type:\"boolean\"}}\n"
@@ -246,16 +271,17 @@ TEMPLATE = {
         },
         {
             "md": (
-                "**What to notice:** point+box mean IoU 0.998254 in the recorded run (every record near 1.0), the prompt-box fill "
-                "baseline 0.856681, and the point-only row — also near 1.0.\n\n"
+                "**What to notice:** point+box mean IoU 0.999394 in the CPU build record (every record near 1.0; the lowest, "
+                "`generated-21` at 0.9974, is a genuine boundary miss by the model), the prompt-box fill baseline 0.855642, and the "
+                "point-only row — also near 1.0.\n\n"
                 "**Checkpoint:** what is the most the fine-tune could gain under point+box prompts here?\n\n"
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
-                "At most 1 − 0.998254 ≈ 0.0017 mean IoU — the pretrained model is at ceiling, because one bright shape on a flat "
+                "At most 1 − 0.999394 ≈ 0.0006 mean IoU — the pretrained model is at ceiling, because one bright shape on a flat "
                 "background with its exact box is easy for a promptable segmenter. Any change Section 8 shows under that condition "
                 "is too small to read on six records. Point-only prompts remove the box, so the model must find the extent itself "
-                "— but one interior point is enough on a single high-contrast shape, and that baseline sits near 0.998 too, so "
+                "— but one interior point is enough on a single high-contrast shape, and that baseline sits at 0.9995, so "
                 "neither condition leaves room to show an effect here. The box-fill "
-                "baseline (0.857) measures what prompting adds, not what adaptation adds.\n\n"
+                "baseline (0.856) measures what prompting adds, not what adaptation adds.\n\n"
                 "</details>"
             ),
         },
@@ -269,6 +295,9 @@ TEMPLATE = {
                 "delta is required — it shows the parameters moved, not that anything improved. The stage then exports the "
                 "adapter to `outputs/sam2-mask-hypernetwork-adapter-v1/` and records its own prediction on the unseen scene, which "
                 "Section 9's fresh reload must reproduce.\n\n"
+                "The training target is the mask resampled to the model's 256×256 low-resolution logits (a cell counts as "
+                "foreground when at least half of it is; a mask smaller than one cell keeps every cell it touches); on the default 256×256 scenes that is the mask itself, while on larger "
+                "BYOD images training sees a coarser mask than evaluation, which scores the full-resolution mask.\n\n"
                 "**Predict before running:** will the training loss fall? Will the per-epoch held-out IoU move much?"
             ),
             "code": (
@@ -279,8 +308,10 @@ TEMPLATE = {
         },
         {
             "md": (
-                "**What to notice:** 139,808 trainable parameters, 36 optimizer steps, training loss 0.0071 → 0.0054 and held-out "
-                "IoU 0.998383 → 0.998457 across the two epochs in the recorded run, and a weight delta around 0.109.\n\n"
+                "**What to notice:** 139,808 trainable parameters, 36 optimizer steps, training loss 0.0071 → 0.0053 and held-out "
+                "IoU 0.999524 → 0.999599 across the two epochs in the CPU build record (the final epoch, 2, is kept), and a weight "
+                "delta around 0.109. The per-epoch IoU uses the held-out records, so it is for observation only: choosing `EPOCHS` "
+                "or a learning rate from it would be selection on the test set and would need a separate validation split.\n\n"
                 "<details>\n<summary>Check your reasoning (open after running)</summary>\n\n"
                 "The loss falls — optimisation works — but the held-out IoU barely moves because it started at ceiling. A falling "
                 "loss and a non-zero weight delta are optimisation evidence; held-out quality is measured in Section 8.\n\n"
@@ -296,21 +327,24 @@ TEMPLATE = {
                 "or above it says *no headroom* and calls the comparison a mechanics check. The report, with every per-record value, "
                 "is written to `outputs/{stem}_evaluation_report.json`. These are sample-sanity results on six generated records: "
                 "one holdout, no dispersion estimate.\n\n"
-                "**Predict before running:** under point+box, will the adapted mean differ from 0.998254 by more than 0.001? How many "
+                "**Predict before running:** under point+box, will the adapted mean differ from 0.999394 by more than 0.001? How many "
                 "of the six records will improve?"
             ),
             "code": "run_stage('evaluate')",
         },
         {
             "md": (
-                "**What to notice:** point+box 0.998254 → 0.998457 in the recorded run with the *no headroom* interpretation, the "
-                "per-record rows, and the point-only rows, which carry the same *no headroom* interpretation.\n\n"
-                "**Checkpoint:** a classmate says \"fine-tuning improved SAM from 0.99825 to 0.99846\". What would you reply?\n\n"
+                "**What to notice:** point+box 0.999394 → 0.999599 (3 of 6 records improved) in the CPU build record with the *no "
+                "headroom* interpretation, the per-record rows, and the point-only rows (0.999538 → 0.999178, 0 of 6 improved), "
+                "which carry the same *no headroom* interpretation.\n\n"
+                "**Checkpoint:** a classmate says \"fine-tuning improved SAM from 0.99939 to 0.99960\". What would you reply?\n\n"
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
                 "That the difference is +0.0002 mean IoU on six records that were already at ceiling: it is within what any small "
                 "perturbation would produce, and the weights moving (Section 7) does not show quality changed. The run shows the "
-                "adaptation machinery works. To claim improvement you would need data with headroom — textured "
-                "backgrounds, low contrast, occlusion or loose boxes; point-only prompts do not supply it on these scenes — a change that holds across most records, and more than one holdout.\n\n"
+                "adaptation machinery works, and point-only, which fell or held on every record, shows the same update can also "
+                "cost a little. To claim improvement you would need data with headroom — textured backgrounds, low contrast, heavier "
+                "occlusion than the two partly covered scenes here, or loose boxes; point-only prompts do not supply it on these "
+                "scenes — a change that holds across most records, and more than one holdout.\n\n"
                 "</details>"
             ),
         },
@@ -327,7 +361,7 @@ TEMPLATE = {
         },
         {
             "md": (
-                "**What to notice:** the unseen-scene IoU (1.0 in the recorded run, model score 0.992), the adapter's files, and "
+                "**What to notice:** the unseen-scene IoU (1.0 in the CPU build record, model score 0.992), the adapter's files, and "
                 "`verification: 'PASSED'` with `mask_exact: True`.\n\n"
                 "**Checkpoint:** why compare against the adapting process instead of against the ground-truth mask?\n\n"
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
@@ -369,7 +403,8 @@ TEMPLATE = {
             "md": (
                 "**What to notice (if you ran it):** whether the larger rate moves either condition, and in which direction.\n\n"
                 "<details>\n<summary>Check your reasoning (open after running)</summary>\n\n"
-                "No hosted run of the activity is recorded yet, so compare your rows. Under point+box there is almost no room to "
+                "No run of the activity is recorded yet, so compare your rows. These rows score the held-out records, so they are "
+                "for observation: picking a learning rate from them would be selection on the test set. Under point+box there is almost no room to "
                 "gain, and point-only sits at ceiling too, so a larger rate can mostly only hurt either condition; read the direction "
                 "per record, not the size. A rate that improves the training loss but lowers held-out IoU is overfitting 18 easy scenes.\n\n"
                 "</details>"
@@ -387,6 +422,7 @@ TEMPLATE = {
         "| a size or SHA-256 mismatch in Section 3 | a file that is not the pinned one | Delete `weights/sam2.1-hiera-small/` and re-run Section 3; never edit the manifest. |\n"
         "| `You are using a model of type sam2_video to instantiate a model of type sam2` | the published config names the video model | Expected: image-mode loading of the same weights is the intended use. |\n"
         "| `Stage '…' failed …: … is missing: run the stage that writes it` | a cell run out of order | Run the notebook in order from Section 4 (or *Run all*). |\n"
+        "| `Refused: <zip>: …` in Section 4, then `not run: the Section 4 data stage refused its input` below | a BYOD ZIP broke one rule | Fix the named file and run Section 4 again; files already in `outputs/` belong to an earlier run and are not this run's result. |\n"
         "| `BYOD_ZIP_PATH is empty, and the upload dialog exists only in Google Colab` | BYOD outside Colab with no path | Set `BYOD_ZIP_PATH`. |\n"
         "| `/kaggle/input holds N ZIP files, not exactly one` | several attached ZIPs | Set `BYOD_ZIP_PATH` to the one you mean. |\n"
         "| `The upload was cancelled or empty` / `Upload exactly one file` | a cancelled or multi-file upload | Run the cell again and choose one ZIP. |\n"
@@ -412,19 +448,23 @@ TEMPLATE = {
         "comparison does and does not show about the fine-tune; and what you would need before claiming that adaptation improves "
         "segmentation on your own images.\n\n"
         "<details>\n<summary>Sample conclusion (open after writing yours)</summary>\n\n"
-        "Under point+box prompts the pretrained model scored 0.998254 mean IoU on six held-out scenes, leaving almost no "
-        "headroom, so the adapted 0.998457 (+0.0002) is a mechanics check: the hypernetwork trained, the adapter exported, and a "
-        "fresh base plus the adapter reproduced the masks exactly. Point-only prompts were near ceiling too, so neither "
+        "Under point+box prompts the pretrained model scored 0.999394 mean IoU on six held-out scenes, leaving almost no "
+        "headroom, so the adapted 0.999599 (+0.0002) is a mechanics check: the hypernetwork trained, the adapter exported, and a "
+        "fresh base plus the adapter reproduced the masks exactly. Point-only prompts were at ceiling too (0.999538, and "
+        "0.999178 after adaptation), so neither "
         "condition shows whether adaptation helps. Before claiming improvement on my own images I would need "
         "representative, human-reviewed masks, a grouped split, several seeds or folds for a dispersion estimate, and a "
         "condition where the pretrained model is clearly imperfect.\n\n"
         "</details>\n\n"
         "**Next experiments:** run the activity at 2e-4 and at 2e-6; bring your own ZIP with `GROUP_SEPARATOR` set and compare "
-        "the two prompt conditions; change `EPOCHS` and watch the per-epoch held-out IoU.\n\n"
+        "the two prompt conditions; change `EPOCHS` and watch the per-epoch held-out IoU (to choose a setting rather than "
+        "watch, split a validation set off the training records first).\n\n"
         "## References\n\n"
-        "- Repository: https://github.com/kurtvalcorza/sam2-segmentation-pipeline\n"
-        "- Repository model card: https://github.com/kurtvalcorza/sam2-segmentation-pipeline/blob/main/MODEL_CARD.md\n"
-        "- Upstream model: https://huggingface.co/{MODEL_ID}\n"
-        "- SAM 2 paper: https://arxiv.org/abs/2408.00714"
+        "IEEE style; the numbers in brackets in the text point here.\n\n"
+        "[1] N. Ravi *et al.*, \"SAM 2: Segment anything in images and videos,\" arXiv:2408.00714, 2024. [Online]. Available: https://arxiv.org/abs/2408.00714\n\n"
+        "[2] A. Kirillov *et al.*, \"Segment anything,\" in *Proc. IEEE/CVF Int. Conf. Comput. Vis. (ICCV)*, 2023. [Online]. Available: https://arxiv.org/abs/2304.02643\n\n"
+        "[3] Meta AI, \"{MODEL_ID},\" Hugging Face model card, revision `{MODEL_REVISION}`. [Online]. Available: https://huggingface.co/{MODEL_ID}/tree/{MODEL_REVISION}\n\n"
+        "[4] K. Valcorza, \"SAM 2.1 Hiera-Small model card,\" sam2-segmentation-pipeline. [Online]. Available: https://github.com/kurtvalcorza/sam2-segmentation-pipeline/blob/main/MODEL_CARD.md\n\n"
+        "[5] K. Valcorza, \"sam2-segmentation-pipeline,\" GitHub repository (code, generated tutorial data and stage runner). [Online]. Available: https://github.com/kurtvalcorza/sam2-segmentation-pipeline"
     ),
 }

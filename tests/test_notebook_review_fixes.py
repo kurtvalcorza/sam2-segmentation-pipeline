@@ -254,7 +254,7 @@ def test_m2_sam2_video_warning_is_explained() -> None:
 
 def test_M2_saturation_is_disclosed_and_a_second_condition_is_scored() -> None:
     md = "\n".join(_src(c) for c in _nb()["cells"] if c["cell_type"] == "markdown")
-    assert "the default task leaves almost nothing to adapt" in md and "0.998254" in md and "mechanics check" in md
+    assert "the default task leaves almost nothing to adapt" in md and "0.999394" in md and "mechanics check" in md
     assert "point-only" in md and "is at ceiling too" in md and "Neither condition can show an adaptation effect" in md
     # Measured on the pinned checkpoint, point-only is ~0.998 as well: no markdown may promise it more room.
     for stale in ("harder held-out condition", "has more room", "is the one that can show an effect", "is the one with room", "where the baseline is lower"):
