@@ -6,10 +6,25 @@ import hashlib
 import io
 import json
 import re
+from pathlib import Path
 
 import numpy as np
+import pytest
 
-from test_notebook_review_fixes import NB, ROOT, STAGES, _nb, _pairs, _quiet, _run, _src, _zip
+from test_notebook_review_fixes import (
+    NB,
+    ROOT,
+    STAGES,
+    _cell_with,
+    _colab,
+    _nb,
+    _pairs,
+    _quiet,
+    _run,
+    _set,
+    _src,
+    _zip,
+)
 
 STEM = STAGES.STEM
 REFUSED = "not run: the Section 4 data stage refused its input"
@@ -108,10 +123,102 @@ def test_SAM2_m5_section_1_does_not_call_the_gpu_optional() -> None:
     assert not [c for c in _nb()["cells"] if "A GPU is recommended, not required" in _src(c)]
 
 
-def test_SAM2_m6_finetune_target_is_not_dilated() -> None:
+def _soft_target(mask: np.ndarray, size=(256, 256)) -> np.ndarray:
+    torch = pytest.importorskip("torch")
+    from sam2_segmentation_pipeline.pipeline import low_res_target
+
+    target = low_res_target(torch.from_numpy(mask.astype(np.float32)), size).numpy()
+    assert target.min() >= 0.0 and target.max() <= 1.0
+    return target
+
+
+def _coverage(target: np.ndarray, mask: np.ndarray) -> float:
+    """Object area the soft target carries, in full-resolution pixels."""
+    return float(target.sum()) * mask.size / target.size
+
+
+def test_SAM2_m6_soft_target_keeps_a_tiny_object() -> None:
+    mask = np.zeros((1024, 1024), bool)
+    mask[500, 500] = True  # one pixel: 1/16 of one 4x4 low-res cell
+    target = _soft_target(mask)
+    assert np.count_nonzero(target) == 1 and target[125, 125] == pytest.approx(1 / 16)
+    assert _coverage(target, mask) == pytest.approx(1.0)
+
+
+def test_SAM2_m6_soft_target_keeps_a_thin_object_without_widening_it() -> None:
+    mask = np.zeros((1024, 1024), bool)
+    mask[100:900, 513] = True  # a 1-px-wide line, 800 px long
+    target = _soft_target(mask)
+    assert target[25:225, 128].min() == pytest.approx(0.25) and target.max() == pytest.approx(0.25)
+    assert _coverage(target, mask) == pytest.approx(800.0)
+
+
+def test_SAM2_m6_soft_target_keeps_a_thin_component_beside_a_large_one() -> None:
+    mask = np.zeros((1024, 1024), bool)
+    mask[100:500, 100:500] = True  # large object
+    mask[700:1000, 900] = True  # thin, disconnected component
+    target = _soft_target(mask)
+    assert target[30:120, 30:120].min() == pytest.approx(1.0)  # the large object's interior is foreground
+    thin = target[175:250, 225]
+    assert thin.min() == pytest.approx(0.25)  # the thin component survives (a majority vote dropped it)
+    assert _coverage(target, mask) == pytest.approx(float(mask.sum()))
+
+
+def test_SAM2_m6_soft_target_is_the_mask_itself_at_logit_resolution() -> None:
+    record = STAGES.generated_records(0, 1)[0]
+    assert np.array_equal(_soft_target(record["mask"]), record["mask"].astype(np.float32))
+
+
+def test_SAM2_m6_finetune_uses_the_soft_target() -> None:
     source = (ROOT / "src" / "sam2_segmentation_pipeline" / "pipeline.py").read_text(encoding="utf-8")
-    assert not re.search(r'mode="area"\s*\)\s*\[0,\s*0\]\s*>\s*0\b', source)
-    assert "target_low = fraction >= 0.5" in source and "if not bool(target_low.any()):" in source
+    assert not re.search(r'mode="area"\s*\)\s*\[0,\s*0\]\s*>\s*0\b', source) and ">= 0.5" not in source
+    assert "target_low = low_res_target(device_target, logits.shape).to(logits.dtype)" in source
+
+
+# ---------------------------------------------------------------- round 2: interpretation, acquisition
+
+
+def test_interpretation_reports_headroom_and_change_and_a_drop_at_any_baseline() -> None:
+    drop = STAGES.interpretation(0.995, 0.70, 0, 6, "point+box")
+    assert "fell by 0.295000" in drop and "degradation" in drop and "mechanics check" not in drop
+    assert "upward headroom (1 - pretrained) 0.005000" in drop and "Little upward headroom" in drop
+    gain = STAGES.interpretation(0.999394, 0.999599, 3, 6, "point+box")
+    assert "change +0.000205" in gain and "fell" not in gain
+    assert "does not establish a reliable generalisation gain" in gain
+    low = STAGES.interpretation(0.70, 0.60, 1, 6, "point-only")
+    assert "fell by 0.100000" in low and "Little upward headroom" not in low
+
+
+@pytest.mark.parametrize(
+    ("uploaded", "message"),
+    [({}, "cancelled or empty"), ({"a.zip": b"1", "b.zip": b"2"}, "Upload exactly one file")],
+    ids=["cancelled", "several-files"],
+)
+def test_acquisition_failure_after_a_successful_run_is_a_refusal(tmp_path, uploaded, message) -> None:
+    run = _run(tmp_path)
+    _quiet(STAGES.stage_data, run)  # an earlier, valid default run
+    adapter = run.out / STAGES.ARTIFACT_DIRNAME
+    adapter.mkdir()
+    (adapter / "adapter.safetensors").write_bytes(b"earlier run")
+    calls = []
+
+    def run_stage(stage, **options):
+        code, out = _main(run, stage, options)
+        calls.append((stage, options, code, out))
+        return code == 0
+
+    cell = _set(_cell_with("USE_BYOD = False  # @param"), "USE_BYOD", True)
+    ns = {"ROOT": run.root, "Path": Path, "run_stage": run_stage}
+    with _colab([uploaded]):
+        exec(compile(cell, "<s4>", "exec"), ns)  # no exception reaches the learner
+    assert [c[0] for c in calls] == ["data", "data"]
+    assert calls[0][1] == {"use_byod": True, "invalidate_only": True}
+    assert calls[1][2] == 2 and "Traceback" not in calls[1][3] and message in calls[1][3]
+    assert message in json.loads((run.state / STAGES.REFUSED_STATE).read_text())["message"]
+    assert not (run.state / "data.json").exists()
+    assert (adapter / "adapter.safetensors").read_bytes() == b"earlier run"
+    code, out = _main(run, "baseline", {})
+    assert code == 2 and REFUSED in out
 
 
 # ---------------------------------------------------------------- NOTEBOOK_SPEC 2.5 (KND1, DOC13-DOC17)

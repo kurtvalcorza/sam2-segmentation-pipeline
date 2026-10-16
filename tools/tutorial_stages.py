@@ -360,21 +360,31 @@ def stage_data(run: Run) -> None:
     seed = int(opts.get("seed", SEED))
     separator = str(opts.get("group_separator") or "")
     if use_byod:
-        try:  # every rule the learner's ZIP can fail is checked before anything on disk changes
+
+        def invalidate(message: str) -> None:
+            # DAT20 / SAM2-m4: invalidate the active run without deleting anything the learner may still want. The
+            # data-ready state goes and a refusal marker is written, so every later stage refuses to run; the earlier
+            # run's files, the adapter included, stay in outputs/ as history and are listed in the marker as stale.
+            clear_run_state(run)
+            stale = sorted(p.name for p in run.out.glob(f"{STEM}_*") if p.is_file())
+            if (run.out / ARTIFACT_DIRNAME).exists():
+                stale.append(ARTIFACT_DIRNAME + "/")
+            run.write_state(REFUSED_STATE, {"message": message, "stale_outputs": stale})
+
+        if opts.get("invalidate_only"):  # called before the notebook acquires a new BYOD input (upload or path)
+            invalidate("a new BYOD attempt started in Section 4 and has not finished")
+            print({"byod": "the active dataset is invalid until this attempt succeeds; earlier files in outputs/ are kept as history"})
+            return
+        try:  # every rule the learner's input can fail is checked before the new dataset replaces anything
+            if opts.get("acquisition_error"):  # the upload was cancelled, held several files, or is unavailable here
+                raise ValueError(str(opts["acquisition_error"]))
             path = find_byod_zip(opts)
             if path.stat().st_size > BYOD_ZIP_MAX_BYTES:
                 raise ValueError(f"{path.name}: {path.stat().st_size} bytes exceeds the 256 MiB BYOD ceiling")
             records = records_from_zip(P, path.read_bytes(), path.name)
             train, held, split_note = group_split(records, seed, separator)
         except (ValueError, FileNotFoundError) as exc:
-            # DAT20 / SAM2-m4: invalidate the active run without deleting anything the learner may still want. The
-            # data-ready state goes and a refusal marker is written, so every later stage refuses to run; the earlier
-            # run's files, the adapter included, stay in outputs/ and are listed in the marker as stale.
-            clear_run_state(run)
-            stale = sorted(p.name for p in run.out.glob(f"{STEM}_*") if p.is_file())
-            if (run.out / ARTIFACT_DIRNAME).exists():
-                stale.append(ARTIFACT_DIRNAME + "/")
-            run.write_state(REFUSED_STATE, {"message": str(exc), "stale_outputs": stale})
+            invalidate(str(exc))
             raise Refusal(str(exc)) from None
         unseen = [held[0]]
         unseen_source = f"held-out BYOD record {held[0]['id']!r} (also scored in Section 8)"
@@ -483,9 +493,14 @@ def stage_adapt(run: Run) -> None:
 
 
 def interpretation(base: float, adapted: float, improved: int, n: int, name: str) -> str:
+    """Upward headroom and the observed change, reported separately; a drop is reported at any baseline level."""
+    change = adapted - base
+    text = f"{name}: pretrained {base:.6f} -> adapted {adapted:.6f}, change {change:+.6f} ({improved} of {n} held-out records improved); upward headroom (1 - pretrained) {1.0 - base:.6f}"
     if base >= SATURATED_IOU:
-        return f"{name}: no headroom — the pretrained model already scores {base:.4f} mean IoU, so the adapted {adapted:.4f} ({adapted - base:+.4f}, {improved}/{n} records improved) is a mechanics check, not evidence that adaptation helped"
-    return f"{name}: pretrained {base:.4f} → adapted {adapted:.4f} ({adapted - base:+.4f}); {improved} of {n} held-out records improved. One holdout of {n} records with no dispersion estimate: read the direction and the per-record pattern, not the size"
+        text += ". Little upward headroom on these samples, so a gain could only be small; a drop is not limited that way"
+    if change < 0:
+        text += f". The held-out mean fell by {-change:.6f}: a degradation on this sample"
+    return text + f". One holdout of {n} records with no dispersion estimate: this does not establish a reliable generalisation gain or loss"
 
 
 def stage_evaluate(run: Run) -> None:
@@ -509,7 +524,7 @@ def stage_evaluate(run: Run) -> None:
         for row in rows:
             print(row)
     box_baseline = adapted["point+box"]["box_baseline_mean_iou"]
-    print({"prompt_box_fill_baseline_mean_iou": rounded(box_baseline), "note": "filling the prompt box shows what prompting adds; it is not the adaptation comparison"})
+    print({"prompt_box_fill_baseline_mean_iou": rounded(box_baseline), "note": "box fill is a trivial baseline that uses the supplied box; the model's advantage over it is image-conditioned boundary recovery, not the adaptation comparison"})
     for reading in readings:
         print({"interpretation": reading})
     report = {
@@ -531,6 +546,45 @@ def stage_evaluate(run: Run) -> None:
     print({"report": f"outputs/{STEM}_evaluation_report.json"})
 
 
+def unseen_figure(record: dict[str, Any], predicted):
+    """One strip: the image, its reference mask, the oracle prompts, the prediction and an error overlay."""
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    image = record["image"].convert("RGB")
+    width, height = image.size
+    scale = min(1.0, 256 / max(width, height))
+    size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    reference, prediction = np.asarray(record["mask"], dtype=bool), np.asarray(predicted, dtype=bool)
+
+    def tile(array):
+        return Image.fromarray(array.astype(np.uint8)).resize(size, Image.NEAREST)
+
+    def white(mask):
+        return np.repeat((mask * 255)[..., None], 3, axis=2)
+
+    prompts = image.copy()
+    draw = ImageDraw.Draw(prompts)
+    line = max(1, round(2 / scale))
+    if record.get("box"):
+        draw.rectangle([float(v) for v in record["box"]], outline=(255, 215, 0), width=line)
+    for x, y in record["points"]:
+        r = max(3, round(4 / scale))
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=(255, 0, 255))
+    overlay = np.asarray(image, dtype=np.float32) * 0.35
+    overlay[reference & prediction] = (0, 200, 0)
+    overlay[prediction & ~reference] = (230, 0, 0)
+    overlay[reference & ~prediction] = (0, 90, 255)
+    tiles = [("image", image.resize(size)), ("reference mask", tile(white(reference))), ("oracle prompts", prompts.resize(size)),
+             ("prediction", tile(white(prediction))), ("green ok, red extra, blue missed", tile(overlay))]
+    canvas = Image.new("RGB", (len(tiles) * (size[0] + 6) + 6, size[1] + 26), "white")
+    for index, (label, picture) in enumerate(tiles):
+        x = 6 + index * (size[0] + 6)
+        canvas.paste(picture, (x, 6))
+        ImageDraw.Draw(canvas).text((x, size[1] + 10), label, fill="black")
+    return canvas
+
+
 def stage_unseen(run: Run) -> None:
     import numpy as np
 
@@ -541,6 +595,7 @@ def stage_unseen(run: Run) -> None:
     result = pipe.segment(unseen["image"], points=unseen["points"], point_labels=unseen["point_labels"], box=unseen["box"], multimask=False)
     iou = P.mask_iou(result["masks"][0], unseen["mask"])
     print({"record": data["unseen_source"], "mask_iou_sample_sanity": round(iou, 6), "model_iou_score": round(result["iou_scores"][0], 6)})
+    unseen_figure(unseen, result["masks"][0]).save(run.out / f"{STEM}_unseen_figure.png")
     reference_mask = np.load(run.state / "unseen_reference_mask.npy")
     mask_exact = bool(np.array_equal(reference_mask, result["masks"]))
     scores_close = bool(np.allclose(adapt["unseen_reference_scores"], result["iou_scores"], rtol=RELOAD_RTOL, atol=RELOAD_ATOL))

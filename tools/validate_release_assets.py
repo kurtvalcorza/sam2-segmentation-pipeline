@@ -95,7 +95,7 @@ NOTEBOOKS = {
             "artifact = pipe.save_artifact(artifact, producer_revision=revision)",
             "P.SAM2SegmentationPipeline.from_artifact(Path(adapt[\"artifact_dir\"]), weights_dir=snapshot_dir(run, P))",
             "improved = sum(a > b for b, a in zip(before, after, strict=True))",
-            "no headroom",
+            "upward headroom",
             "mask_exact = bool(np.array_equal(reference_mask, result[\"masks\"]))",
             "if not (mask_exact and scores_close):",
             '"weight_delta_l2": adapt["weight_delta_l2"]',

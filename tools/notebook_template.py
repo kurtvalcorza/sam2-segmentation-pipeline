@@ -94,19 +94,22 @@ TEMPLATE = {
         "**Read this before Section 8: the default task leaves almost nothing to adapt.** Each generated scene is one bright "
         "shape on a flat dark background, and the recorded condition gives the model the shape's exact box and an interior "
         "point. The pretrained model already scored held-out mask IoU 0.999394 in the CPU build record (see How to use this "
-        "notebook), and the adapted model 0.999599 — a change of +0.0002 on six images, which is a mechanics check, not an improvement. The notebook also "
+        "notebook), and the adapted model 0.999599 — a measured change of +0.000205 on six images, which does not establish a "
+        "reliable generalisation gain: on these scenes the default run is a mechanics check of the workflow. The notebook also "
         "scores a second held-out condition, **point-only prompts** (no box), generated from the same records, and prints "
         "every held-out record before and after. One interior point is enough on a single high-contrast shape, so point-only "
         "is at ceiling too (0.999538 before and 0.999178 after adaptation, 0 of 6 records improved, in the same record). "
-        "Neither condition can show an adaptation effect: the lesson here is the workflow — validate, measure, adapt, export, "
-        "reload, and read the result honestly — not a gain."
+        "Both conditions leave little upward headroom on these samples (1 − pretrained is about 0.0006 and 0.0005), so a gain "
+        "could only be small, while a drop could still be large and would be reported. The lesson here is the workflow — "
+        "validate, measure, adapt, export, reload, and read the result honestly — not a gain."
     ),
     "learning_objectives": (
         "by the end of this notebook you will be able to —\n\n"
+        "0. **Explain** in plain words what a binary mask, IoU, held-out data, logits, a loss and a gradient update are, using the worked example and the glossary (Sections 4–7).\n"
         "1. **Validate** paired image / mask / prompt records and **explain** why the held-out split is fixed before any model runs (Sections 4, 5).\n"
-        "2. **Measure** a pretrained held-out baseline under two prompt conditions and **say** how much headroom it leaves (Section 6).\n"
+        "2. **Measure** a pretrained held-out baseline under two prompt conditions and **say** how much upward headroom it leaves (Section 6).\n"
         "3. **Describe** what the bounded fine-tune changes — one mask hypernetwork — and why the weights moving is not evidence of improvement (Section 7).\n"
-        "4. **Judge** an adaptation result from per-record held-out IoU, and **distinguish** a mechanics check from evidence of improvement (Section 8).\n"
+        "4. **Judge** an adaptation result from per-record held-out IoU, **distinguish** a mechanics check from evidence of improvement, and **recognise** a degradation at any baseline level (Section 8).\n"
         "5. **Verify** that the exported adapter on a fresh base reproduces the adapting process (Section 9).\n"
         "6. **Predict**, run and **explain** the effect of a larger learning rate in an optional activity (Section 11)."
     ),
@@ -116,15 +119,14 @@ TEMPLATE = {
     ),
     "prerequisites": [
         "- **Runtime:** a fresh **Linux x86_64** runtime **with a CUDA GPU** — Google Colab with a T4 GPU, or a Kaggle GPU kernel. The fine-tune needs CUDA, so Section 1 stops at once on a CPU-only runtime. The kernel's own Python version does not matter: the notebook installs nothing into it, and runs every stage with CPython 3.12.12 in an isolated environment built from {n_locked} hash-locked packages (`torch` 2.14.0 with its CUDA libraries, `transformers` 4.57.6, `safetensors` 0.8.0, `numpy` 2.5.3, `pillow` 11.3.0). About 0.2 GB of disk is needed for the snapshot and about 9 GB for the isolated environment.",
-        "- **Knowledge:** Python, binary masks and IoU, and why training and held-out data must be kept apart. The glossary below explains the SAM-specific terms.",
+        "- **Knowledge:** basic Python. No machine-learning experience is assumed: masks, IoU, held-out data and the training terms (logits, loss, gradient update, epoch, learning rate) are explained where they are first used and in the glossary below.",
         "- **Data:** the default path generates 24 shape scenes. Optional BYOD accepts one ZIP with `images/` and `masks/` paired by stem (masks as PNG, white = foreground), at least 8 and at most 64 pairs, each image 16..4096 px per side and matching its mask, 32 megapixels in all. Do not upload confidential or restricted data unless you are authorized to use it in the hosted runtime.",
     ],
     "guided": {
         "opening": [
             (
                 "## How to use this notebook\n\n"
-                "**Who this notebook is for.** Learners who can run cells in a hosted notebook and read short Python, who know what a "
-                "binary mask and IoU are, and who want to see a promptable segmentation model adapted end to end: a fixed held-out "
+                "**Who this notebook is for.** Learners who can run cells in a hosted notebook and read short Python, and who want to see a promptable segmentation model adapted end to end: a fixed held-out "
                 "split, a pretrained baseline, a bounded fine-tune, an honest per-record comparison, and an adapter that reloads "
                 "with identical masks. No experience with SAM is assumed; the glossary below explains every term.\n\n"
                 "**Running it.** Choose a GPU runtime (*Runtime → Change runtime type → T4 GPU* in Colab), then *Runtime → Run all*. "
@@ -183,9 +185,17 @@ TEMPLATE = {
                 "| **Hypernetwork** | A small MLP that produces the weights used to read out one mask token; the only part trained here. |\n"
                 "| **Mask IoU** | Intersection over union of predicted and true masks: 1.0 is a perfect match. |\n"
                 "| **Soft-Dice loss** | A differentiable overlap loss used with binary cross-entropy (BCE) during training. |\n"
-                "| **Headroom** | How far the pretrained score is from perfect; with no headroom, adaptation cannot show an effect. |\n"
+                "| **Upward headroom** | How far the pretrained score is from perfect (1 − pretrained). With little of it a gain can only be small, but a drop can still be large. |\n"
+                "| **Oracle prompts** | Prompts computed from the reference mask itself (an interior point and its bounding box), so the scores exclude any human placement error. |\n"
+                "| **Logits** | The model's raw per-pixel scores before they are turned into probabilities; a pixel is predicted foreground when its logit is above 0. |\n"
+                "| **Loss (BCE)** | Binary cross-entropy: one number that is small when the predicted probabilities match the target mask. Training lowers it. |\n"
+                "| **Gradient update** | One small change to the trainable weights in the direction that lowers the loss on one training record. |\n"
+                "| **Frozen vs trainable** | Frozen weights never change; only the trainable hypernetwork (139,808 numbers) is updated here. |\n"
+                "| **Epoch** | One pass over all 18 training records (18 updates here). |\n"
+                "| **Learning rate** | How big each update step is; too large and training can overshoot. |\n"
+                "| **AdamW** | The optimizer: it turns each gradient into an update, adapting the step per weight and shrinking weights slightly (weight decay). |\n"
                 "| **Adapter vs base** | The adapter holds only the trained hypernetwork; it is attached to the pinned, unchanged base model. |\n"
-                "| **Reload parity** | A fresh base plus the adapter gives the same masks and scores as the process that trained it. |\n"
+                "| **Reload parity** | A fresh base plus the adapter gives the same masks and scores as the process that trained it — checked on the tested scene(s), not on every possible input. |\n"
                 "| **Hash-locked environment / stage** | The isolated Python environment every stage runs in; one workflow step run as its own process. |\n\n"
                 "</details>"
             ),
@@ -199,20 +209,25 @@ TEMPLATE = {
                 "a flat background, drawn by code in the carried stage runner [5] (no downloaded data). Each record has an RGB "
                 "image, a boolean mask, a foreground point and a bounding box. Where the distractor covers part of the shape (two "
                 "of the 25 scenes, by 13 and 48 pixels), the mask is the shape's **visible** region: covered pixels are background. "
-                "The point and box are derived from that mask: the point is the median of the mask's pixel indices (x, y), and the "
-                "box is `[x_min, y_min, x_max + 1, y_max + 1]` — the outer pixel edges — in original-image pixels. BYOD prompts "
+                "The prompts are **oracle prompts** derived from that mask, so no human placement error enters the scores. The point "
+                "is the median of the mask's pixel indices (x, y); when that location is not inside the mask (a concave or split "
+                "shape), it falls back to the first foreground pixel in row-major order, often a boundary pixel. The box is the "
+                "mask's half-open bounding rectangle `[x_min, y_min, x_max + 1, y_max + 1]` in original-image pixels. BYOD prompts "
                 "are derived from your masks the same way. Records "
                 "0–17 train; 18–23 are held out — fixed before any model runs, so nothing the model does can influence the split.\n\n"
-                "**Pretraining overlap.** SAM 2 was trained on SA-1B [2] and SA-V [1]. The default scenes are generated in this run, "
-                "so they cannot overlap that data. BYOD images drawn from public photo collections may overlap SA-1B; on such "
+                "**Pretraining overlap.** SAM 2 was trained on SA-1B [2] and SA-V [1]. The default scenes are generated in this run: "
+                "no image from those datasets is used and no exact overlap is known, though synthetic provenance does not mean the "
+                "shapes or visual concepts are unfamiliar to the model. BYOD images drawn from public photo collections may overlap SA-1B; on such "
                 "images a high pretrained IoU can partly reflect pretraining exposure rather than generalisation.\n\n"
                 "**Bring your own data.** Set `USE_BYOD = True` and `BYOD_ZIP_PATH` (or, in Colab, leave it empty for the upload "
                 "dialog; on Kaggle a single attached ZIP is found automatically). The split is a seeded shuffle of 25 % of the "
                 "records; set `GROUP_SEPARATOR` so records whose stems share a prefix (`scene1_a`, `scene1_b` with `_`) stay "
                 "together, otherwise every image is treated as independent. A wrapping folder, unmatched stems (named), JPEG "
                 "masks, unsafe paths, oversized archives and fewer than 8 pairs are each refused with one message naming the file "
-                "and the rule. A refusal changes nothing in `outputs/`: files from an earlier run stay there, but the later cells "
-                "will not run on them (each prints *not run*) until this cell succeeds with corrected input."
+                "and the rule. With `USE_BYOD = True` the cell first marks the active dataset invalid, then asks for the file, so a "
+                "cancelled upload, several files chosen at once or a missing upload dialog are refused the same way. A refusal "
+                "changes nothing in `outputs/`: files from an earlier run stay there as history, but the later cells will not run "
+                "on them (each prints *not run*) until this cell succeeds with corrected input."
             ),
             "code": (
                 "USE_BYOD = False  # @param {{type:\"boolean\"}}\n"
@@ -236,8 +251,14 @@ TEMPLATE = {
                 "    return str(path)\n\n"
                 "byod_zip = ''\n"
                 "if USE_BYOD:\n"
-                "    byod_zip = BYOD_ZIP_PATH or ('' if Path('/kaggle/input').is_dir() else upload_one('one BYOD ZIP with images/ and masks/', 'BYOD_ZIP_PATH'))\n"
-                "run_stage('data', use_byod=USE_BYOD, byod_zip_path=byod_zip, group_separator=GROUP_SEPARATOR, seed=SEED)"
+                "    run_stage('data', use_byod=True, invalidate_only=True)  # the active dataset is invalid until this attempt succeeds\n"
+                "    try:\n"
+                "        byod_zip = BYOD_ZIP_PATH or ('' if Path('/kaggle/input').is_dir() else upload_one('one BYOD ZIP with images/ and masks/', 'BYOD_ZIP_PATH'))\n"
+                "    except (RuntimeError, ValueError) as exc:  # a cancelled, multi-file or unavailable upload is a refusal too\n"
+                "        byod_zip = None\n"
+                "        run_stage('data', use_byod=True, acquisition_error=str(exc))\n"
+                "if byod_zip is not None:\n"
+                "    run_stage('data', use_byod=USE_BYOD, byod_zip_path=byod_zip, group_separator=GROUP_SEPARATOR, seed=SEED)"
             ),
         },
         {
@@ -258,6 +279,10 @@ TEMPLATE = {
         {
             "md": (
                 "## 6. Measure the pretrained held-out baseline · [Evaluation practice]\n\n"
+                "**Worked example: mask and IoU.** A mask marks each pixel as object (1) or background (0). Suppose the reference "
+                "mask has 6 object pixels and a prediction marks 5, of which 4 are also in the reference. The *intersection* is 4 "
+                "pixels and the *union* is 6 + 5 − 4 = 7, so IoU = 4 / 7 ≈ 0.571. A perfect prediction scores 1.0; one that misses "
+                "the object entirely scores 0.\n\n"
                 "Before any update the pretrained model scores the six held-out records under two prompt conditions: **point+box** "
                 "(the exact box and an interior point — the recorded condition) and **point-only** (the same point, no box). Each "
                 "record's IoU is printed, with the IoU of simply filling the prompt box. Loading the model prints *You are using a "
@@ -272,16 +297,18 @@ TEMPLATE = {
         {
             "md": (
                 "**What to notice:** point+box mean IoU 0.999394 in the CPU build record (every record near 1.0; the lowest, "
-                "`generated-21` at 0.9974, is a genuine boundary miss by the model), the prompt-box fill baseline 0.855642, and the "
+                "`generated-21` at 0.9974, is a genuine boundary miss by the model), the prompt-box fill baseline 0.855642 (a "
+                "trivial baseline that fills the supplied box), and the "
                 "point-only row — also near 1.0.\n\n"
                 "**Checkpoint:** what is the most the fine-tune could gain under point+box prompts here?\n\n"
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
                 "At most 1 − 0.999394 ≈ 0.0006 mean IoU — the pretrained model is at ceiling, because one bright shape on a flat "
-                "background with its exact box is easy for a promptable segmenter. Any change Section 8 shows under that condition "
-                "is too small to read on six records. Point-only prompts remove the box, so the model must find the extent itself "
+                "background with its exact box is easy for a promptable segmenter. Any gain under that condition can only be small; "
+                "a drop could still be large. Point-only prompts remove the box, so the model must find the extent itself "
                 "— but one interior point is enough on a single high-contrast shape, and that baseline sits at 0.9995, so "
-                "neither condition leaves room to show an effect here. The box-fill "
-                "baseline (0.856) measures what prompting adds, not what adaptation adds.\n\n"
+                "neither condition leaves much room for a gain here. Box fill (0.856) is a trivial baseline that uses the supplied "
+                "box; SAM 2's advantage over it is image-conditioned boundary recovery beyond filling that box, and it says nothing "
+                "about adaptation.\n\n"
                 "</details>"
             ),
         },
@@ -295,9 +322,12 @@ TEMPLATE = {
                 "delta is required — it shows the parameters moved, not that anything improved. The stage then exports the "
                 "adapter to `outputs/sam2-mask-hypernetwork-adapter-v1/` and records its own prediction on the unseen scene, which "
                 "Section 9's fresh reload must reproduce.\n\n"
-                "The training target is the mask resampled to the model's 256×256 low-resolution logits (a cell counts as "
-                "foreground when at least half of it is; a mask smaller than one cell keeps every cell it touches); on the default 256×256 scenes that is the mask itself, while on larger "
-                "BYOD images training sees a coarser mask than evaluation, which scores the full-resolution mask.\n\n"
+                "**How training works here.** For each training record the model predicts *logits* on a 256×256 grid; the loss "
+                "(BCE plus soft-Dice) compares them with the target, and AdamW makes one small *gradient update* to the trainable "
+                "hypernetwork only. The target is a **soft target**: for each of the 256×256 cells, the fraction of the cell the mask "
+                "covers (a value from 0 to 1). On the default 256×256 scenes that is the mask itself. On larger BYOD images every "
+                "object keeps its share — a tiny or thin object contributes a fraction to each cell it touches instead of vanishing "
+                "or being widened to whole cells — while evaluation scores the full-resolution mask.\n\n"
                 "**Predict before running:** will the training loss fall? Will the per-epoch held-out IoU move much?"
             ),
             "code": (
@@ -323,8 +353,9 @@ TEMPLATE = {
                 "## 8. Evaluate the adapted model, record by record · [Evaluation practice]\n\n"
                 "A fresh process attaches the exported adapter to a fresh pinned base and scores the six held-out records under both "
                 "prompt conditions. For each condition the stage prints the pretrained and adapted mean, the change, how many "
-                "records improved, every record before and after, and an **interpretation** line: when the pretrained mean is 0.99 "
-                "or above it says *no headroom* and calls the comparison a mechanics check. The report, with every per-record value, "
+                "records improved, every record before and after, and an **interpretation** line that reports the upward headroom "
+                "(1 − pretrained) separately from the observed change, notes *little upward headroom* when the pretrained mean is "
+                "0.99 or above, and reports any fall in the mean as a degradation whatever the baseline. The report, with every per-record value, "
                 "is written to `outputs/{stem}_evaluation_report.json`. These are sample-sanity results on six generated records: "
                 "one holdout, no dispersion estimate.\n\n"
                 "**Predict before running:** under point+box, will the adapted mean differ from 0.999394 by more than 0.001? How many "
@@ -334,17 +365,18 @@ TEMPLATE = {
         },
         {
             "md": (
-                "**What to notice:** point+box 0.999394 → 0.999599 (3 of 6 records improved) in the CPU build record with the *no "
-                "headroom* interpretation, the per-record rows, and the point-only rows (0.999538 → 0.999178, 0 of 6 improved), "
-                "which carry the same *no headroom* interpretation.\n\n"
+                "**What to notice:** point+box 0.999394 → 0.999599 (+0.000205, 3 of 6 records improved) in the CPU build record "
+                "with the *little upward headroom* note, the per-record rows, and the point-only rows (0.999538 → 0.999178, 0 of 6 "
+                "improved), which the interpretation reports as a degradation of 0.000360 on this sample.\n\n"
                 "**Checkpoint:** a classmate says \"fine-tuning improved SAM from 0.99939 to 0.99960\". What would you reply?\n\n"
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
-                "That the difference is +0.0002 mean IoU on six records that were already at ceiling: it is within what any small "
-                "perturbation would produce, and the weights moving (Section 7) does not show quality changed. The run shows the "
-                "adaptation machinery works, and point-only, which fell or held on every record, shows the same update can also "
-                "cost a little. To claim improvement you would need data with headroom — textured backgrounds, low contrast, heavier "
-                "occlusion than the two partly covered scenes here, or loose boxes; point-only prompts do not supply it on these "
-                "scenes — a change that holds across most records, and more than one holdout.\n\n"
+                "The measured sample mean rose by 0.000205 on six records that were already near ceiling; this doesn't establish a "
+                "reliable generalisation gain — there is one holdout and no dispersion estimate — and the weights moving (Section 7) "
+                "does not show quality changed. The run shows the adaptation machinery works, and point-only, which fell by "
+                "0.000360, shows the same update can also cost a little. To claim improvement you would need data with headroom — "
+                "textured backgrounds, low contrast, heavier occlusion than the two partly covered scenes here, or loose boxes; "
+                "point-only prompts do not supply it on these scenes — evaluated on a representative, independent test set with a "
+                "paired uncertainty estimate (for example a bootstrap over records).\n\n"
                 "</details>"
             ),
         },
@@ -354,10 +386,15 @@ TEMPLATE = {
                 "A fresh process attaches the adapter to a fresh pinned base and segments the unseen scene — `generated-24`, outside "
                 "the train and held-out range, or one of your held-out records with BYOD. It then compares the mask and scores with "
                 "the prediction the adapting process recorded in Section 7: the mask must match exactly and the scores within "
-                "`rtol=1e-5`, `atol=1e-6`, or the stage stops with *Do not ship this artifact*. The stage only reads the adapter, so "
-                "re-running it alone is safe."
+                "`rtol=1e-5`, `atol=1e-6`, or the stage stops with *Do not ship this artifact*. It also saves `outputs/{stem}_unseen_figure.png` — "
+                "the image, its reference mask, the oracle prompts, the prediction and an error overlay (green correct, red extra, "
+                "blue missed) — and shows it below. The stage only reads the adapter, so re-running it alone is safe."
             ),
-            "code": "run_stage('unseen')",
+            "code": (
+                "if run_stage('unseen'):\n"
+                "    from IPython.display import Image, display\n"
+                "    display(Image(filename=str(OUTPUTS / '{stem}_unseen_figure.png')))"
+            ),
         },
         {
             "md": (
@@ -367,7 +404,8 @@ TEMPLATE = {
                 "<details>\n<summary>Check your reasoning (open after answering)</summary>\n\n"
                 "The ground truth tests quality; this check tests packaging. A user receives the adapter and the pinned base, not "
                 "the trained object, so the question is whether those files rebuild exactly the model that was evaluated. An exact "
-                "mask and matching scores answer it; a mismatch would mean the evaluation describes a different model from the one "
+                "mask and matching scores answer it for the tested scene — agreement there, not proof of equivalence on every "
+                "input; a mismatch would mean the evaluation describes a different model from the one "
                 "shipped.\n\n"
                 "</details>"
             ),
@@ -406,7 +444,9 @@ TEMPLATE = {
                 "No run of the activity is recorded yet, so compare your rows. These rows score the held-out records, so they are "
                 "for observation: picking a learning rate from them would be selection on the test set. Under point+box there is almost no room to "
                 "gain, and point-only sits at ceiling too, so a larger rate can mostly only hurt either condition; read the direction "
-                "per record, not the size. A rate that improves the training loss but lowers held-out IoU is overfitting 18 easy scenes.\n\n"
+                "per record, not the size. A rate that lowers the training loss but also lowers held-out IoU could be overfitting 18 "
+                "easy scenes — one possible explanation; unstable optimisation, or the gap between the training loss and the "
+                "thresholded IoU, are others.\n\n"
                 "</details>"
             ),
         },
@@ -436,9 +476,10 @@ TEMPLATE = {
         "## Interpretation and limits\n\n"
         "This run proves the exact notebook can validate paired masks, update the declared adapter surface from the pinned base, "
         "score a fixed held-out split per record under two prompt conditions, serialize only the adapter, attach it to the exact "
-        "pinned base in a fresh process, and reproduce inference after reload. On the default point+box condition the pretrained "
-        "model is already at ceiling, so that comparison is a mechanics check: it cannot show that adaptation helps, and the "
-        "notebook says so. The point-only condition is at ceiling on these scenes as well, so it cannot show it either. "
+        "pinned base in a fresh process, and reproduce inference after reload on the tested scene. On the default scenes "
+        "both prompt conditions leave little upward headroom (about 0.0006 and 0.0005), so the run is a mechanics check of "
+        "the workflow: a gain could only be small, the measured +0.000205 under point+box does not establish a reliable "
+        "generalisation gain, and the point-only mean fell by 0.000360. A large drop would still be visible and reported. "
         "Nothing here shows improvement on photographs or any deployment domain. Real use requires rights-cleared representative "
         "images, human-reviewed masks, leakage-safe (grouped) splits, and boundary-error analysis.\n\n"
         "Successful execution proves that the recorded repository revision can complete this bounded tutorial without the "
@@ -449,10 +490,10 @@ TEMPLATE = {
         "segmentation on your own images.\n\n"
         "<details>\n<summary>Sample conclusion (open after writing yours)</summary>\n\n"
         "Under point+box prompts the pretrained model scored 0.999394 mean IoU on six held-out scenes, leaving almost no "
-        "headroom, so the adapted 0.999599 (+0.0002) is a mechanics check: the hypernetwork trained, the adapter exported, and a "
-        "fresh base plus the adapter reproduced the masks exactly. Point-only prompts were at ceiling too (0.999538, and "
-        "0.999178 after adaptation), so neither "
-        "condition shows whether adaptation helps. Before claiming improvement on my own images I would need "
+        "upward headroom, so the adapted 0.999599 (+0.000205) does not establish a reliable gain; the run is a mechanics "
+        "check: the hypernetwork trained, the adapter exported, and a fresh base plus the adapter reproduced the masks "
+        "exactly on the tested scene. Point-only prompts were at ceiling too (0.999538, and 0.999178 after adaptation, a "
+        "small drop), so neither condition shows that adaptation helps. Before claiming improvement on my own images I would need "
         "representative, human-reviewed masks, a grouped split, several seeds or folds for a dispersion estimate, and a "
         "condition where the pretrained model is clearly imperfect.\n\n"
         "</details>\n\n"
