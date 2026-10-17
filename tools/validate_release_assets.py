@@ -95,7 +95,7 @@ NOTEBOOKS = {
             "artifact = pipe.save_artifact(artifact, producer_revision=revision)",
             "P.SAM2SegmentationPipeline.from_artifact(Path(adapt[\"artifact_dir\"]), weights_dir=snapshot_dir(run, P))",
             "improved = sum(a > b for b, a in zip(before, after, strict=True))",
-            "no headroom",
+            "upward headroom",
             "mask_exact = bool(np.array_equal(reference_mask, result[\"masks\"]))",
             "if not (mask_exact and scores_close):",
             '"weight_delta_l2": adapt["weight_delta_l2"]',
@@ -142,7 +142,7 @@ NOTEBOOKS = {
 # Specification 2.0; see docs/release-verification.md for the release gate.
 # ---------------------------------------------------------------------------
 
-NOTEBOOK_SPEC = "2.2"
+NOTEBOOK_SPEC = "2.5"
 ALLOWED_PROFILES = {"E2E", "ARTIFACT-INFERENCE", "TASK-INFERENCE", "MULTI-CAPABILITY", "SMOKE"}
 STATUS_TOKENS = ("Candidate", "Release-grade")
 PLACEHOLDER = re.compile(r"\b(TODO|TBD|FIXME)\b|Insert text here|Tooltip:", re.I)
@@ -204,7 +204,8 @@ COMMON_MARKDOWN_MARKERS = (
     "without the repository being",
     "It does **not** establish benchmark superiority",
     "## References",
-    f"- Repository model card: https://github.com/kurtvalcorza/{REPO_NAME}/blob/main/MODEL_CARD.md",
+    f"https://github.com/kurtvalcorza/{REPO_NAME}/blob/main/MODEL_CARD.md",
+    "> **⚠️ Notice.** For research, training and evaluation only.",
 )
 # Isolated-runtime contract (RUN1, RUN10, ENV6; TDC-M1/TDCA-M2): markers the generator-owned install cell carries.
 ISOLATION_MARKERS = (
@@ -462,6 +463,11 @@ def _validate_notebook_structure(path: Path, notebook: dict, spec: dict, templat
     _check(profile == spec["profile"], f"{path.name}: profile {profile!r} != declared {spec['profile']!r}")
     _check(dimer.get("notebook_spec") == NOTEBOOK_SPEC, f"{path.name}: metadata.dimer must declare notebook spec version '{NOTEBOOK_SPEC}'")
     _check(dimer.get("notebook_mode") == "GUIDED", f"{path.name}: metadata.dimer.notebook_mode must be GUIDED")
+    _check(dimer.get("notebook_kind") == "TUTORIAL", f"{path.name}: metadata.dimer.notebook_kind must be TUTORIAL (KND1)")
+    markdown_text = "\n".join("".join(c["source"]) if isinstance(c["source"], list) else c["source"] for c in notebook["cells"] if c["cell_type"] == "markdown")
+    body, _, references = markdown_text.partition("## References")
+    entries, cited = set(re.findall(r"^\[(\d+)\] ", references, re.M)), set(re.findall(r"\[(\d+)\]", body))
+    _check(bool(entries) and entries == cited, f"{path.name}: numbered citations {sorted(cited)} and reference entries {sorted(entries)} must correspond one to one (DOC16)")
     _check(dimer.get("standalone") is True, f"{path.name}: metadata.dimer.standalone must be true (ST6)")
     generated = dimer.get("generated_from")
     _check(isinstance(generated, dict), f"{path.name}: metadata.dimer.generated_from is required (ST5)")

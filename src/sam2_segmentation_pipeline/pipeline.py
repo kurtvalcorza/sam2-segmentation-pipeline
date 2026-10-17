@@ -346,6 +346,19 @@ def stage_missing_files(
     return missing
 
 
+def low_res_target(mask, size):
+    """Fractional area coverage of each low-res logit cell by the full-resolution mask, in [0, 1] (SAM2-m6).
+
+    A soft target keeps every object's coverage: a tiny or thin object contributes its fraction of each
+    cell it touches, instead of vanishing (a majority vote) or filling whole cells (thresholding at
+    ``> 0``). BCE and soft Dice both accept soft targets. When the mask already has the logits' size,
+    the target is the mask itself.
+    """
+    import torch.nn.functional as F
+
+    return F.interpolate(mask[None, None].float(), size=tuple(size), mode="area")[0, 0].clamp(0.0, 1.0)
+
+
 def mask_iou(a: np.ndarray, b: np.ndarray) -> float:
     """Intersection-over-union of two boolean masks of identical shape; the primitive behind any mIoU."""
     a = np.asarray(a)
@@ -963,12 +976,8 @@ class SAM2SegmentationPipeline:
                         multimask_output=False,
                         **device_prompts,
                     ).pred_masks[0, 0, 0]
-                    target_low = (
-                        F.interpolate(
-                            device_target[None, None], size=logits.shape, mode="area"
-                        )[0, 0]
-                        > 0
-                    ).to(logits.dtype)
+                    # Soft target: the fraction of each low-res cell the mask covers (SAM2-m6).
+                    target_low = low_res_target(device_target, logits.shape).to(logits.dtype)
                     probabilities = logits.sigmoid()
                     bce = F.binary_cross_entropy_with_logits(logits, target_low)
                     dice = 1.0 - (2.0 * (probabilities * target_low).sum() + 1.0) / (

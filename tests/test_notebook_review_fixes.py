@@ -254,8 +254,9 @@ def test_m2_sam2_video_warning_is_explained() -> None:
 
 def test_M2_saturation_is_disclosed_and_a_second_condition_is_scored() -> None:
     md = "\n".join(_src(c) for c in _nb()["cells"] if c["cell_type"] == "markdown")
-    assert "the default task leaves almost nothing to adapt" in md and "0.998254" in md and "mechanics check" in md
-    assert "point-only" in md and "is at ceiling too" in md and "Neither condition can show an adaptation effect" in md
+    assert "the default task leaves almost nothing to adapt" in md and "0.999394" in md and "mechanics check" in md
+    assert "point-only" in md and "is at ceiling too" in md and "little upward headroom on these samples" in md
+    assert "Neither condition can show an adaptation effect" not in md and "within what any small" not in md
     # Measured on the pinned checkpoint, point-only is ~0.998 as well: no markdown may promise it more room.
     for stale in ("harder held-out condition", "has more room", "is the one that can show an effect", "is the one with room", "where the baseline is lower"):
         assert stale not in md, stale
@@ -267,9 +268,9 @@ def test_M2_saturation_is_disclosed_and_a_second_condition_is_scored() -> None:
 
 def test_M2_interpretation_says_no_headroom_at_ceiling_and_reads_per_record_otherwise() -> None:
     at_ceiling = STAGES.interpretation(0.998254, 0.998457, 4, 6, "point+box")
-    assert "no headroom" in at_ceiling and "mechanics check" in at_ceiling and "+0.0002" in at_ceiling
+    assert "Little upward headroom" in at_ceiling and "+0.000203" in at_ceiling and "fell" not in at_ceiling
     room = STAGES.interpretation(0.82, 0.86, 5, 6, "point-only")
-    assert "no headroom" not in room and "5 of 6 held-out records improved" in room and "no dispersion estimate" in room
+    assert "Little upward headroom" not in room and "5 of 6 held-out records improved" in room and "no dispersion estimate" in room
 
 
 def test_M2_evaluate_reports_every_record_and_the_records_improved() -> None:
@@ -369,17 +370,18 @@ def test_m1_byod_path_and_upload_branches(tmp_path, monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "google.colab", None)
     ns, calls = _kernel(tmp_path)
     exec(compile(_set(_set(cell, "USE_BYOD", True), "BYOD_ZIP_PATH", "/d/mine.zip"), "<s4>", "exec"), ns)
-    assert calls[0] == ("data", {"use_byod": True, "byod_zip_path": "/d/mine.zip", "group_separator": "", "seed": 42})
+    assert calls[0] == ("data", {"use_byod": True, "invalidate_only": True})
+    assert calls[1] == ("data", {"use_byod": True, "byod_zip_path": "/d/mine.zip", "group_separator": "", "seed": 42})
     if not Path("/kaggle/input").is_dir():
         ns, calls = _kernel(tmp_path)
-        with pytest.raises(RuntimeError, match="BYOD_ZIP_PATH is empty, and the upload dialog exists only in Google Colab"):
-            exec(compile(_set(cell, "USE_BYOD", True), "<s4>", "exec"), ns)
+        exec(compile(_set(cell, "USE_BYOD", True), "<s4>", "exec"), ns)  # routed to the refusal, not raised
+        assert calls[1][0] == "data" and "the upload dialog exists only in Google Colab" in calls[1][1]["acquisition_error"]
         monkeypatch.undo()
         with _colab([{}]) as files:
             ns, calls = _kernel(tmp_path)
-            with pytest.raises(RuntimeError, match="cancelled or empty"):
-                exec(compile(_set(cell, "USE_BYOD", True), "<s4>", "exec"), ns)
-            assert files.calls == 1 and calls == []
+            exec(compile(_set(cell, "USE_BYOD", True), "<s4>", "exec"), ns)
+            assert files.calls == 1 and [c[1] for c in calls] == [{"use_byod": True, "invalidate_only": True}, {"use_byod": True, "acquisition_error": calls[1][1]["acquisition_error"]}]
+            assert "cancelled or empty" in calls[1][1]["acquisition_error"]
 
 
 # ---------------------------------------------------------------- default path, model-free stages

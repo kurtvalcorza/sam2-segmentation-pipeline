@@ -234,7 +234,12 @@ def test_finetune_preserves_a_single_pixel_foreground_when_downsampling(monkeypa
     pipeline.freeze_for_adaptation()
     pipeline.finetune([record, dict(record, id="single-pixel-2")], epochs=1, learning_rate=1e-2)
     assert observed_targets
-    assert all(float(target.sum()) >= 1.0 for target in observed_targets)
+    # Soft targets (SAM2-m6): the pixel keeps its exact share of the low-res grid instead of vanishing
+    # or filling whole cells, so the target is never empty and carries the object's coverage.
+    assert all(float(target.sum()) > 0.0 for target in observed_targets)
+    assert all(
+        float(target.sum()) * mask.size / target.numel() == pytest.approx(1.0) for target in observed_targets
+    )
 
 
 def test_failed_retraining_restores_weights_and_completion_metadata(monkeypatch):
