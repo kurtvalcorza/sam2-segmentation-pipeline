@@ -78,10 +78,12 @@ def test_SAM2_m4_refusal_is_one_message_keeps_prior_outputs_and_blocks_later_sta
     bad.write_bytes(_zip({**_pairs([f"s{i}" for i in range(8)]), "images/extra.png": extra}))
 
     code, out = _main(run, "data", {"use_byod": True, "byod_zip_path": str(bad)})
-    assert code == 2 and "Traceback" not in out
-    assert "mine.zip" in out and "images without a mask: ['extra']" in out
+    # The kernel shows the line once (DAT20), so the stage itself prints neither it nor a traceback.
+    assert code == 2 and "Traceback" not in out and "Refused" not in out
     error = json.loads((run.state / "data.error.json").read_text())
     assert error["refusal"] is True and error["type"] == "Refusal"
+    assert error["message"].startswith("mine.zip: ")
+    assert "images without a mask: ['extra']" in error["message"]
     # Earlier work is not destroyed, but the run is no longer data-ready and the marker lists what is stale.
     assert (adapter / "adapter.safetensors").read_bytes() == b"earlier run"
     assert (run.out / f"{STEM}_evaluation_report.json").is_file()
@@ -91,7 +93,9 @@ def test_SAM2_m4_refusal_is_one_message_keeps_prior_outputs_and_blocks_later_sta
 
     for stage in ("validate", "baseline", "adapt", "evaluate", "unseen", "result", "activity"):
         code, out = _main(run, stage, {})
-        assert code == 2 and "Traceback" not in out and REFUSED in out, stage
+        error = json.loads((run.state / f"{stage}.error.json").read_text())
+        assert code == 2 and "Traceback" not in out, stage
+        assert error["not_run"] is True and REFUSED in error["message"], stage
 
     _quiet(STAGES.stage_data, run)  # a corrected data stage clears the refusal
     assert not (run.state / STAGES.REFUSED_STATE).exists() and (run.state / "data.json").is_file()
@@ -109,10 +113,13 @@ def test_SAM2_m4_a_genuine_failure_keeps_its_traceback(tmp_path, monkeypatch) ->
     assert "refusal" not in json.loads((run.state / "data.error.json").read_text())
 
 
-def test_SAM2_m4_kernel_reports_a_refusal_without_raising() -> None:
+def test_SAM2_m4_kernel_raises_a_refusal_as_one_line() -> None:
+    # DAT20 (2026-10-26): the kernel raises the refusal, so Run all stops at the Section 4 cell;
+    # tested end to end in tests/test_dat20_refusal.py.
     cells = [_src(c) for c in _nb()["cells"] if c["cell_type"] == "code"]
     install = next(c for c in cells if "def run_stage(" in c)
-    assert "error.get('refusal')" in install and "return False" in install
+    assert "raise StageRefusal(" in install and "raise StageNotRun(" in install
+    assert "return False" not in install
     assert "Fix the named file" in install
 
 
@@ -213,12 +220,13 @@ def test_acquisition_failure_after_a_successful_run_is_a_refusal(tmp_path, uploa
         exec(compile(cell, "<s4>", "exec"), ns)  # no exception reaches the learner
     assert [c[0] for c in calls] == ["data", "data"]
     assert calls[0][1] == {"use_byod": True, "invalidate_only": True}
-    assert calls[1][2] == 2 and "Traceback" not in calls[1][3] and message in calls[1][3]
+    assert calls[1][2] == 2 and "Traceback" not in calls[1][3]
+    assert message in json.loads((run.state / "data.error.json").read_text())["message"]
     assert message in json.loads((run.state / STAGES.REFUSED_STATE).read_text())["message"]
     assert not (run.state / "data.json").exists()
     assert (adapter / "adapter.safetensors").read_bytes() == b"earlier run"
     code, out = _main(run, "baseline", {})
-    assert code == 2 and REFUSED in out
+    assert code == 2 and REFUSED in json.loads((run.state / "baseline.error.json").read_text())["message"]
 
 
 # ---------------------------------------------------------------- NOTEBOOK_SPEC 2.5 (KND1, DOC13-DOC17)

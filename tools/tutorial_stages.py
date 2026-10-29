@@ -331,7 +331,7 @@ def find_byod_zip(opts: dict[str, Any]) -> Path:
     if raw:
         path = Path(raw).expanduser()
         if not path.is_file():
-            raise FileNotFoundError(f"BYOD_ZIP_PATH {raw!r} is not a file in this runtime: upload the ZIP or correct the path.")
+            raise FileNotFoundError("BYOD_ZIP_PATH is not a file in this runtime: upload the ZIP or correct the path.")
         return path
     kaggle = Path("/kaggle/input")
     if kaggle.is_dir():
@@ -375,17 +375,25 @@ def stage_data(run: Run) -> None:
             invalidate("a new BYOD attempt started in Section 4 and has not finished")
             print({"byod": "the active dataset is invalid until this attempt succeeds; earlier files in outputs/ are kept as history"})
             return
+        # DAT19: the file every refusal names (the given path, the uploaded names, or "(no file)").
+        label = str(opts.get("acquisition_file") or "").strip() or "(no file)"
         try:  # every rule the learner's input can fail is checked before the new dataset replaces anything
             if opts.get("acquisition_error"):  # the upload was cancelled, held several files, or is unavailable here
                 raise ValueError(str(opts["acquisition_error"]))
+            raw = str(opts.get("byod_zip_path") or "").strip()
+            label = raw or ("/kaggle/input" if Path("/kaggle/input").is_dir() else "(no file)")
             path = find_byod_zip(opts)
+            label = path.name
             if path.stat().st_size > BYOD_ZIP_MAX_BYTES:
                 raise ValueError(f"{path.name}: {path.stat().st_size} bytes exceeds the 256 MiB BYOD ceiling")
             records = records_from_zip(P, path.read_bytes(), path.name)
             train, held, split_note = group_split(records, seed, separator)
         except (ValueError, FileNotFoundError) as exc:
-            invalidate(str(exc))
-            raise Refusal(str(exc)) from None
+            message = str(exc).rstrip(".")
+            if not message.startswith(f"{label}: "):
+                message = f"{label}: {message}"
+            invalidate(message)
+            raise Refusal(message) from None
         unseen = [held[0]]
         unseen_source = f"held-out BYOD record {held[0]['id']!r} (also scored in Section 8)"
         kind, origin = "BYOD", path.name
@@ -691,14 +699,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.stage not in ("weights", "data") and refused.is_file():
         reason = json.loads(refused.read_text(encoding="utf-8")).get("message", "")
         message = f"not run: the Section 4 data stage refused its input ({reason}), so there is no current dataset; files already in outputs/ belong to an earlier run and are not this run's result"
-        print(message)
-        error_file.write_text(json.dumps({"type": "Refusal", "message": message, "refusal": True}), encoding="utf-8")
+        error_file.write_text(json.dumps({"type": "NotRun", "message": message, "refusal": True, "not_run": True}), encoding="utf-8")
         return 2
     try:
         STAGES[args.stage](run)
     except BaseException as exc:  # noqa: BLE001 -- every failure is reported to the kernel with its own message
         if isinstance(exc, Refusal):  # an expected refusal of the learner's input: one message, no traceback (DAT20)
-            print(f"Refused: {exc}")
+            # The kernel raises it as one `Refused: <file>: <reason>` line; printing it here would show it twice.
             error_file.write_text(json.dumps({"type": "Refusal", "message": str(exc), "refusal": True}), encoding="utf-8")
             return 2
         traceback.print_exc()  # a genuine failure keeps its traceback

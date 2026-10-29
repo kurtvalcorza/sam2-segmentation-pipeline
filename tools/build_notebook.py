@@ -390,6 +390,22 @@ if not RUNTIME['cuda']:
     print('The isolated environment sees no CUDA GPU: every stage runs on the CPU (slower; see Prerequisites and Troubleshooting).')
 
 
+class StageRefusal(Exception):
+    \"\"\"A refused input (DAT20): shown as one `Refused: <file>: <reason>` line, without a traceback; Run all stops here.\"\"\"
+
+    dimer_refusal = True
+
+    def _render_traceback_(self):
+        return ['Refused: ' + str(self)]
+
+
+class StageNotRun(Exception):
+    \"\"\"A later stage declined to run because Section 4 refused its input: shown as its message alone.\"\"\"
+
+    def _render_traceback_(self):
+        return [str(self)]
+
+
 def run_stage(stage, **options):
     \"\"\"Run one stage of the carried runner in its own process with the isolated interpreter; stream its output.\"\"\"
     if not (ROOT / {runner!r}).is_file() or not PYTHON.is_file():
@@ -412,9 +428,10 @@ def run_stage(stage, **options):
         detail = 'see the log above'
         if error_file.is_file():
             error = json.loads(error_file.read_text(encoding='utf-8'))
-            if error.get('refusal'):  # an expected refusal of your input (DAT20): the message above says what to fix
-                print('Fix the named file or setting and run the Section 4 data cell again; the later cells will not run on the old results until it succeeds.')
-                return False
+            if error.get('not_run'):  # Section 4 refused its input, so there is no current dataset for this stage
+                raise StageNotRun(error['message'])
+            if error.get('refusal'):  # an expected refusal of your input (DAT20): one line, and Run all stops here
+                raise StageRefusal(error['message'] + '. Fix the named file or setting and run the Section 4 data cell again; the later cells will not run on the old results until it succeeds.')
             detail = error['type'] + ': ' + error['message']
         raise RuntimeError(f'Stage {{stage!r}} failed (exit {{process.returncode}}): {{detail}}')
     return True
