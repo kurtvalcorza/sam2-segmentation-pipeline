@@ -380,7 +380,7 @@ def test_m1_byod_path_and_upload_branches(tmp_path, monkeypatch) -> None:
         with _colab([{}]) as files:
             ns, calls = _kernel(tmp_path)
             exec(compile(_set(cell, "USE_BYOD", True), "<s4>", "exec"), ns)
-            assert files.calls == 1 and [c[1] for c in calls] == [{"use_byod": True, "invalidate_only": True}, {"use_byod": True, "acquisition_error": calls[1][1]["acquisition_error"]}]
+            assert files.calls == 1 and [c[1] for c in calls] == [{"use_byod": True, "invalidate_only": True}, {"use_byod": True, "acquisition_error": calls[1][1]["acquisition_error"], "acquisition_file": "(no file)"}]
             assert "cancelled or empty" in calls[1][1]["acquisition_error"]
 
 
